@@ -4,5 +4,7 @@ namespace DbAutomatization.Core.Services
     {
         Task<bool> StartServiceAsync(string serviceName);
         Task<bool> StopServiceAsync(string serviceName);
+        Task<bool> RestartServiceAsync(string serviceName);
+
     }
 }

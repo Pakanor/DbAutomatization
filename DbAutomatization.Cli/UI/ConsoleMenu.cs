@@ -13,7 +13,7 @@ public class ConsoleMenu{
            while (true)
         {
             Console.WriteLine("\n[1] Skanuj bazy danych");
-            Console.WriteLine("[2] Zarządzaj bazą (Start/Stop)");
+            Console.WriteLine("[2] Zarządzaj bazą");
             Console.WriteLine("[3] Dodaj nową bazę do listy");
             Console.WriteLine("[4] Usun bazę z listy");
 
@@ -30,7 +30,7 @@ public class ConsoleMenu{
                     await _appService.HandleScanAsync();
                     break;
                 case "2":
-                    await _appService.HandleManagementAsync();
+                    await _appService.HandleManageDatabaseAsync();
                     break;
                 case "3":
                     await _appService.HandleAddDatabaseAsync();

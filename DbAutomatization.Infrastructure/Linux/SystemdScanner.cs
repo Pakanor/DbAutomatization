@@ -8,7 +8,7 @@ public class SystemdScanner : IDatabaseScanner
 {
     private readonly IBashExecutor _bash;
     private readonly string _filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "databases.json");
-    private Dictionary<string, string> _supportedDatabases = new();
+    private Dictionary<string, DatabaseConfig> _supportedDatabases = new();
     
    
 
@@ -17,18 +17,30 @@ public class SystemdScanner : IDatabaseScanner
         _bash = bash;
         LoadDatabasesFromFile();
     }
-    
+
 
         private void LoadDatabasesFromFile()
         {
             if (!File.Exists(_filePath))
             {
-                _supportedDatabases = new Dictionary<string, string>
+                _supportedDatabases = new Dictionary<string, DatabaseConfig>
                 {
-                    { "postgresql", "PostgreSQL" },
-                    { "mariadb", "MariaDB" },
-                    { "mongod", "MongoDB" },
-                    { "redis-server", "Redis" }
+                    { 
+                        "postgresql", 
+                        new DatabaseConfig { FriendlyName = "PostgreSQL", CliCommand = "sudo -u postgres psql" } 
+                    },
+                    { 
+                        "mariadb", 
+                        new DatabaseConfig { FriendlyName = "MariaDB", CliCommand = "mariadb" } 
+                    },
+                    { 
+                        "mongod", 
+                        new DatabaseConfig { FriendlyName = "MongoDB", CliCommand = "mongosh" } 
+                    },
+                    { 
+                        "redis-server", 
+                        new DatabaseConfig { FriendlyName = "Redis", CliCommand = "redis-cli" } 
+                    }
                 };
                 SaveDatabasesToFile(); 
                 return;
@@ -37,12 +49,12 @@ public class SystemdScanner : IDatabaseScanner
             try
             {
                 string jsonString = File.ReadAllText(_filePath);
-                _supportedDatabases = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonString) 
-                                    ?? new Dictionary<string, string>();
+                _supportedDatabases = JsonSerializer.Deserialize<Dictionary<string, DatabaseConfig>>(jsonString) 
+                                    ?? new Dictionary<string, DatabaseConfig>();
             }
             catch
             {
-                _supportedDatabases = new Dictionary<string, string>();
+                _supportedDatabases = new Dictionary<string, DatabaseConfig>();
             }
         }
 
@@ -57,13 +69,19 @@ public class SystemdScanner : IDatabaseScanner
 
 
 
-        public void RegisterDatabase(string serviceName, string friendlyName){
-            string key = serviceName.ToLower().Trim();
-            if(!_supportedDatabases.ContainsKey(key)){
-                _supportedDatabases.Add(key, friendlyName);
-                SaveDatabasesToFile();
+        public void RegisterDatabase(string serviceName, string friendlyName, string cliCommand)
+            {
+                string key = serviceName.ToLower().Trim();
+                if (!_supportedDatabases.ContainsKey(key))
+                {
+                    _supportedDatabases.Add(key, new DatabaseConfig 
+                    { 
+                        FriendlyName = friendlyName, 
+                        CliCommand = cliCommand 
+                    });
+                    SaveDatabasesToFile();
+                }
             }
-        }
 
             public void UnregisterDatabase(string serviceName)
             {
@@ -75,30 +93,36 @@ public class SystemdScanner : IDatabaseScanner
                 }
 
         public async Task<bool> DoesServiceExistAsync(string serviceName)
-            {
-                string key = serviceName.ToLower().Trim();
-                var unitFileStatus = await _bash.ExecuteAsync($"systemctl list-unit-files {key}.service");
-                return !string.IsNullOrWhiteSpace(unitFileStatus) && unitFileStatus.Contains(key);
-            }
+{
+            string key = serviceName.ToLower().Trim();
+            
+            var whichStatus = await _bash.ExecuteAsync($"which {key}");
+            
+            return !string.IsNullOrWhiteSpace(whichStatus) && !whichStatus.Contains("not found");
+        }
 
 
 
         public async Task<(bool Success, string ErrorMessage)> InstallServiceViaAptAsync(string packageName, string serviceName)
+        {
+            Console.WriteLine($"\n[APT] Aktualizacja repozytoriów...");
+            await _bash.ExecuteAsync("sudo apt update -y");
+
+            Console.WriteLine($"[APT] Instalacja pakietu {packageName}... To może chwilę potrwać.");
+            var installResult = await _bash.ExecuteAsync($"sudo apt install -y {packageName}");
+
+           
+            bool aptSuccess = installResult.Contains("Instalowane:") || 
+                            installResult.Contains("jest już w najnowszej wersji") ||
+                            installResult.Contains("is already the newest version");
+
+            if (aptSuccess)
             {
-                Console.WriteLine($"\n[APT] Aktualizacja repozytoriów...");
-                await _bash.ExecuteAsync("sudo apt update -y");
-
-                Console.WriteLine($"[APT] Instalacja pakietu {packageName}... To może chwilę potrwać.");
-                var installResult = await _bash.ExecuteAsync($"sudo apt install -y {packageName}");
-
-                bool exists = await DoesServiceExistAsync(serviceName);
-                if (exists)
-                {
-                    return (true, string.Empty);
-                }
-
-                return (false, installResult);
+                return (true, string.Empty);
             }
+
+            return (false, installResult);
+        }
 
 
         public async Task<List<DetectedDatabase>> ScanForDatabasesAsync()
@@ -108,14 +132,20 @@ public class SystemdScanner : IDatabaseScanner
                 foreach (var kvp in _supportedDatabases)
                 {
                     string serviceName = kvp.Key;
-                    string friendlyName = kvp.Value;
+                    string friendlyName = kvp.Value.FriendlyName;
+                    string fullCommand = kvp.Value.CliCommand;
 
-                    var unitFileStatus = await _bash.ExecuteAsync($"systemctl list-unit-files {serviceName}.service");
-                    bool isInstalled = !string.IsNullOrWhiteSpace(unitFileStatus) && unitFileStatus.Contains(serviceName);
+                  
+                    string binaryToFind = fullCommand.Split(' ').Last(); 
+
+                    var whichStatus = await _bash.ExecuteAsync($"which {binaryToFind}");
+                    
+                    bool isInstalled = !string.IsNullOrWhiteSpace(whichStatus) && !whichStatus.Contains("not found");
 
                     bool isRunning = false;
                     if (isInstalled)
                     {
+                        
                         var activeStatus = await _bash.ExecuteAsync($"systemctl is-active {serviceName}");
                         isRunning = activeStatus.Trim() == "active";
                     }

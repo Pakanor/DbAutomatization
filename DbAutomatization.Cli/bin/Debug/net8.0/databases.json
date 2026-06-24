@@ -1,6 +1,22 @@
 {
-  "postgresql": "PostgreSQL",
-  "mariadb": "MariaDB",
-  "mongod": "MongoDB",
-  "redis-server": "Redis"
+  "postgresql": {
+    "FriendlyName": "PostgreSQL",
+    "CliCommand": "sudo -u postgres psql"
+  },
+  "mariadb": {
+    "FriendlyName": "MariaDB",
+    "CliCommand": "mariadb"
+  },
+  "mongod": {
+    "FriendlyName": "MongoDB",
+    "CliCommand": "mongosh"
+  },
+  "redis-server": {
+    "FriendlyName": "Redis",
+    "CliCommand": "redis-cli"
+  },
+  "sqlite3": {
+    "FriendlyName": "Sqlite",
+    "CliCommand": "sqlite3"
+  }
 }

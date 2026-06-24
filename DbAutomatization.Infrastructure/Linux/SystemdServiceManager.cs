@@ -22,10 +22,18 @@ public class SystemdServiceManager : IServiceManager
         _ = await _bash.ExecuteAsync($"sudo systemctl stop {serviceName}");
         return !await IsActiveAsync(serviceName);
     }
+    public async Task<bool> RestartServiceAsync(string serviceName)
+        {
+            _ = await _bash.ExecuteAsync($"sudo systemctl restart {serviceName}");
+            
+            return await IsActiveAsync(serviceName);
+        }
+
 
     private async Task<bool> IsActiveAsync(string serviceName)
     {
         var status = await _bash.ExecuteAsync($"systemctl is-active {serviceName}");
         return status.Trim() == "active";
     }
+    
 }

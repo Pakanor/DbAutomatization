@@ -37,97 +37,149 @@ public class DatabaseAppService
     Console.WriteLine("--------------------------------------------------");
 }
 
-    public async Task HandleManagementAsync()
+    public async Task HandleManageDatabaseAsync()
+{
+    var databases = await _scanner.ScanForDatabasesAsync();
+
+    if (databases == null || !databases.Any())
     {
-        var databases = await _scanner.ScanForDatabasesAsync();
-        var installedDbs = databases.Where(d => d.IsInstalled).ToList();
+        Console.WriteLine("\n[!] Brak baz danych do zarządzania.");
+        return;
+    }
 
-        if (!installedDbs.Any())
+    Console.WriteLine("\n--- Wybierz bazę do zarządzania ---");
+    for (int i = 0; i < databases.Count; i++)
+    {
+        var db = databases[i];
+        string status = db.IsInstalled 
+            ? (db.IsRunning ? "URUCHOMIONA" : "ZATRZYMANA") 
+            : "NIEZAINSTALOWANA";
+            
+        Console.WriteLine($"[{i + 1}] {db.Name} ({db.ServiceName}) -> {status}");
+    }
+    Console.WriteLine("[0] Powrót");
+
+    Console.Write("\nWybór: ");
+    if (!int.TryParse(Console.ReadLine(), out int dbIndex) || dbIndex < 0 || dbIndex > databases.Count)
+    {
+        Console.WriteLine("Niepoprawny wybór.");
+        return;
+    }
+
+    if (dbIndex == 0) return; 
+
+    var selectedDb = databases[dbIndex - 1];
+
+    if (!selectedDb.IsInstalled)
+    {
+        Console.WriteLine($"\n[!] Baza {selectedDb.Name} nie jest zainstalowana w systemie. Zainstaluj ją najpierw (opcja 3).");
+        return;
+    }
+
+    while (true)
+    {
+        string currentStatus = selectedDb.IsRunning ? "URUCHOMIONA" : "ZATRZYMANA";
+        Console.WriteLine($"\n=== Zarządzanie bazą: {selectedDb.Name} [{currentStatus}] ===");
+        Console.WriteLine("[1] Uruchom (Start)");
+        Console.WriteLine("[2] Zatrzymaj (Stop)");
+        Console.WriteLine("[3] Zrestartuj (Restart)");
+        Console.WriteLine("[4] Wejdź do konsoli CLI");
+        Console.WriteLine("[0] Powrót do menu głównego");
+        Console.Write("\nWybór działania: ");
+
+        var subChoice = Console.ReadLine()?.Trim();
+
+        if (subChoice == "0") break;
+
+        switch (subChoice)
         {
-            Console.WriteLine("Brak zainstalowanych baz do zarządzania.");
-            return;
+            case "1":
+                Console.WriteLine($"Uruchamianie {selectedDb.Name}...");
+                await _manager.StartServiceAsync(selectedDb.ServiceName); 
+                break;
+
+            case "2":
+                Console.WriteLine($"Zatrzymywanie {selectedDb.Name}...");
+                await _manager.StopServiceAsync(selectedDb.ServiceName);
+                break;
+
+            case "3":
+                Console.WriteLine($"Restartowanie {selectedDb.Name}...");
+                await _manager.RestartServiceAsync(selectedDb.ServiceName); 
+                break;
+
+            case "4":
+                Console.WriteLine($"\nOpalanie konsoli interaktywnej dla {selectedDb.Name}...\n");
+                break;
+
+            default:
+                Console.WriteLine("Niepoprawna opcja.");
+                break;
         }
 
-        Console.WriteLine("\nWybierz bazę do przełączenia stanu:");
-        for (int i = 0; i < installedDbs.Count; i++)
-        {
-            var db = installedDbs[i];
-            Console.WriteLine($"[{i + 1}] {db.Name} (Aktualnie: {(db.IsRunning ? "Działa" : "Stoi")})");
-        }
+        var updatedList = await _scanner.ScanForDatabasesAsync();
+        selectedDb = updatedList.FirstOrDefault(d => d.ServiceName == selectedDb.ServiceName) ?? selectedDb;
+    }
+}
 
-        Console.Write("Wybór: ");
-        if (!int.TryParse(Console.ReadLine(), out int index) || index < 1 || index > installedDbs.Count)
-        {
-            Console.WriteLine("Błędny indeks.");
-            return;
-        }
+   public async Task HandleAddDatabaseAsync()
+{
+    Console.WriteLine("\n--- Dodawanie nowej bazy ---");
+    
+    Console.Write("Podaj nazwę bazy w systemie (np. redis-server, postgresql): ");
+    var systemName = Console.ReadLine()?.ToLower().Trim();
+    if (string.IsNullOrWhiteSpace(systemName)) return;
 
-        var selectedDb = installedDbs[index - 1];
+    Console.Write("Podaj nazwę wyświetlaną w menu (np. Redis, PostgreSQL): ");
+    var friendlyName = Console.ReadLine();
+    if (string.IsNullOrWhiteSpace(friendlyName)) return;
 
-        if (selectedDb.IsRunning)
+    Console.Write($"Podaj komendę CLI do wejścia w bazę (domyślnie: '{systemName}', ENTER aby zaakceptować): ");
+    var cliCommand = Console.ReadLine()?.Trim();
+    
+    if (string.IsNullOrWhiteSpace(cliCommand))
+    {
+        cliCommand = systemName;
+    }
+
+    bool exists = await _scanner.DoesServiceExistAsync(systemName);
+
+    if (exists)
+    {
+        _scanner.RegisterDatabase(systemName, friendlyName, cliCommand);
+        Console.WriteLine($"\n[V] Baza '{friendlyName}' już istnieje w systemie i została dodana do monitorowania.");
+        return;
+    }
+
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.Write($"\n[!] Baza '{systemName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
+    Console.ResetColor();
+    
+    var answer = Console.ReadLine()?.ToLower().Trim();
+
+    if (answer == "y" || answer == "yes")
+    {
+        var (success, errorMessage) = await _scanner.InstallServiceViaAptAsync(systemName, systemName);
+
+        if (success)
         {
-            Console.WriteLine($"Zatrzymywanie {selectedDb.Name}...");
-            var success = await _manager.StopServiceAsync(selectedDb.ServiceName);
-            Console.WriteLine(success ? "Zatrzymano pomyślnie." : "Błąd (sprawdź uprawnienia sudo).");
+            _scanner.RegisterDatabase(systemName, friendlyName, cliCommand);
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"\n[V] Sukces! Pomyślnie zainstalowano i dodano bazę {friendlyName} do monitorowania.");
+            Console.ResetColor();
         }
         else
         {
-            Console.WriteLine($"Uruchamianie {selectedDb.Name}...");
-            var success = await _manager.StartServiceAsync(selectedDb.ServiceName);
-            Console.WriteLine(success ? "Uruchomiono pomyślnie." : "Błąd (sprawdź uprawnienia sudo).");
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{systemName}' nie powiodła się.");
+            Console.ResetColor();
+            
+            Console.WriteLine("\n--- Logi z systemu Linux ---");
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(errorMessage);
+            Console.ResetColor();
         }
     }
-
-    public async Task HandleAddDatabaseAsync()
-{
-        Console.WriteLine("\n--- Dodawanie nowej bazy ---");
-        
-        Console.Write("Podaj nazwę bazy w systemie (np. redis-server, postgresql): ");
-        var systemName = Console.ReadLine()?.ToLower().Trim();
-        if (string.IsNullOrWhiteSpace(systemName)) return;
-
-        Console.Write("Podaj nazwę wyświetlaną w menu (np. Redis, PostgreSQL): ");
-        var friendlyName = Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(friendlyName)) return;
-
-        bool exists = await _scanner.DoesServiceExistAsync(systemName);
-
-        if (exists)
-        {
-            _scanner.RegisterDatabase(systemName, friendlyName);
-            Console.WriteLine($"\n[V] Baza '{friendlyName}' już istnieje w systemie i została dodana do monitorowania.");
-            return;
-        }
-
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write($"\n[!] Baza '{systemName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
-        Console.ResetColor();
-        
-        var answer = Console.ReadLine()?.ToLower().Trim();
-
-        if (answer == "y" || answer == "yes")
-        {
-            var (success, errorMessage) = await _scanner.InstallServiceViaAptAsync(systemName, systemName);
-
-            if (success)
-            {
-                _scanner.RegisterDatabase(systemName, friendlyName);
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"\n[V] Sukces! Pomyślnie zainstalowano i dodano bazę {friendlyName} do monitorowania.");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{systemName}' nie powiodła się.");
-                Console.ResetColor();
-                
-                Console.WriteLine("\n--- Logi z systemu Linux ---");
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine(errorMessage);
-                Console.ResetColor();
-            }
-        }
 }
 
     public void HandleRemoveDatabase()
