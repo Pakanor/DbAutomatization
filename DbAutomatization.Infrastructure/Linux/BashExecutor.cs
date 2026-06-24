@@ -7,28 +7,31 @@ public class BashExecutor : IBashExecutor
 {
     public async Task<string> ExecuteAsync(string command)
     {
-        var psi = new ProcessStartInfo
+        var escapedArgs = command.Replace("\"", "\\\"");
+
+        var startInfo = new ProcessStartInfo
         {
             FileName = "/bin/bash",
-            Arguments = $"-c \"{command}\"",
+            Arguments = $"-c \"{escapedArgs}\"",
             RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            RedirectStandardError = true, 
             UseShellExecute = false,
             CreateNoWindow = true
         };
 
-        using var process = new Process { StartInfo = psi };
+        using var process = new Process { StartInfo = startInfo };
         process.Start();
-        
+
         string output = await process.StandardOutput.ReadToEndAsync();
         string error = await process.StandardError.ReadToEndAsync();
+
         await process.WaitForExitAsync();
-        
-        if (!string.IsNullOrWhiteSpace(error) && process.ExitCode != 0)
+
+        if (string.IsNullOrWhiteSpace(output) && !string.IsNullOrWhiteSpace(error))
         {
-            return string.Empty; 
+            return error;
         }
-        
+
         return output;
     }
 }

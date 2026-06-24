@@ -1,0 +1,6 @@
+{
+  "postgresql": "PostgreSQL",
+  "mariadb": "MariaDB",
+  "mongod": "MongoDB",
+  "redis-server": "Redis"
+}
