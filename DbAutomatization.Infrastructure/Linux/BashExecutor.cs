@@ -34,4 +34,23 @@ public class BashExecutor : IBashExecutor
 
         return output;
     }
+
+    public async Task ExecuteInteractiveAsync(string command)
+    {
+        var processInfo = new ProcessStartInfo
+        {
+            FileName = "/bin/bash",
+            Arguments = $"-c \"{command}\"",
+            RedirectStandardInput = false,  
+            RedirectStandardOutput = false, 
+            RedirectStandardError = false,  
+            UseShellExecute = false         
+        };
+
+        using var process = Process.Start(processInfo);
+        if (process != null)
+        {
+            await process.WaitForExitAsync();
+        }
+    }
 }

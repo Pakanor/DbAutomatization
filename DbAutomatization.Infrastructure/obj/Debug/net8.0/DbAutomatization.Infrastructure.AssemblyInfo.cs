@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DbAutomatization.Infrastructure")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fd4fbf36df99b4daac931c0f44d6a9e7364e6f9a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+131e8766cc5114d3fca792f73e3bd429086efe3c")]
 [assembly: System.Reflection.AssemblyProductAttribute("DbAutomatization.Infrastructure")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DbAutomatization.Infrastructure")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

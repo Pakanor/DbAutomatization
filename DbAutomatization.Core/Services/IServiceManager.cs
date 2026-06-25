@@ -2,9 +2,10 @@ namespace DbAutomatization.Core.Services
 {
     public interface IServiceManager
     {
-        Task<bool> StartServiceAsync(string serviceName);
-        Task<bool> StopServiceAsync(string serviceName);
-        Task<bool> RestartServiceAsync(string serviceName);
+        Task StartServiceAsync(string serviceName);
+        Task StopServiceAsync(string serviceName);
+        Task RestartServiceAsync(string serviceName);
+        Task OpenDatabaseCliAsync(string serviceName, string customCliCommand);
 
     }
 }

@@ -9,6 +9,7 @@ namespace DbAutomatization.Core.Services
         void UnregisterDatabase(string serviceName);
         Task<(bool Success, string ErrorMessage)> InstallServiceViaAptAsync(string packageName, string serviceName);
         Task<bool> DoesServiceExistAsync(string serviceName);
+        string GetCliCommandForService(string serviceName);
 
         
 

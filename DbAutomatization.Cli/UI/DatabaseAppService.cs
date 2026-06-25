@@ -110,6 +110,8 @@ public class DatabaseAppService
 
             case "4":
                 Console.WriteLine($"\nOpalanie konsoli interaktywnej dla {selectedDb.Name}...\n");
+                string cliCommand = _scanner.GetCliCommandForService(selectedDb.ServiceName);
+                await _manager.OpenDatabaseCliAsync(selectedDb.ServiceName, cliCommand);
                 break;
 
             default:

@@ -11,22 +11,19 @@ public class SystemdServiceManager : IServiceManager
         _bash = bash;
     }
 
-    public async Task<bool> StartServiceAsync(string serviceName)
+    public async Task StartServiceAsync(string serviceName)
     {
-        _ = await _bash.ExecuteAsync($"sudo systemctl start {serviceName}");
-        return await IsActiveAsync(serviceName);
+        await _bash.ExecuteAsync($"sudo systemctl start {serviceName}");
     }
 
-    public async Task<bool> StopServiceAsync(string serviceName)
+    public async Task StopServiceAsync(string serviceName)
     {
-        _ = await _bash.ExecuteAsync($"sudo systemctl stop {serviceName}");
-        return !await IsActiveAsync(serviceName);
+        await _bash.ExecuteAsync($"sudo systemctl stop {serviceName}");
     }
-    public async Task<bool> RestartServiceAsync(string serviceName)
+    public async Task RestartServiceAsync(string serviceName)
         {
-            _ = await _bash.ExecuteAsync($"sudo systemctl restart {serviceName}");
+            await _bash.ExecuteAsync($"sudo systemctl restart {serviceName}");
             
-            return await IsActiveAsync(serviceName);
         }
 
 
@@ -35,5 +32,15 @@ public class SystemdServiceManager : IServiceManager
         var status = await _bash.ExecuteAsync($"systemctl is-active {serviceName}");
         return status.Trim() == "active";
     }
+
+    public async Task OpenDatabaseCliAsync(string serviceName, string customCliCommand)
+    {
+        string finalCommand = string.IsNullOrWhiteSpace(customCliCommand) 
+            ? serviceName 
+            : customCliCommand;
+
+        await _bash.ExecuteInteractiveAsync(finalCommand);
+    }
+
     
 }

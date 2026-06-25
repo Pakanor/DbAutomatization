@@ -100,6 +100,17 @@ public class SystemdScanner : IDatabaseScanner
             
             return !string.IsNullOrWhiteSpace(whichStatus) && !whichStatus.Contains("not found");
         }
+        public string GetCliCommandForService(string serviceName)
+        {
+            string key = serviceName.ToLower().Trim();
+        
+            if (_supportedDatabases.TryGetValue(key, out var config))
+            {
+                return config.CliCommand;
+            }            if (_supportedDatabases.TryGetValue(key, out var config))
+
+            return serviceName; 
+        }
 
 
 
