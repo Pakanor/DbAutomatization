@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DbAutomatization.Cli")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+131e8766cc5114d3fca792f73e3bd429086efe3c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+453e43ba2086da19006e54d00b6cd1ec40f75112")]
 [assembly: System.Reflection.AssemblyProductAttribute("DbAutomatization.Cli")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DbAutomatization.Cli")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

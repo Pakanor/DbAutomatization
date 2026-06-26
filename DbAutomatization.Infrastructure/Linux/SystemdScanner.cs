@@ -23,25 +23,50 @@ public class SystemdScanner : IDatabaseScanner
         {
             if (!File.Exists(_filePath))
             {
-                _supportedDatabases = new Dictionary<string, DatabaseConfig>
-                {
+       _supportedDatabases = new Dictionary<string, DatabaseConfig>
+            {
+                { 
+                    "postgresql", 
+                    new DatabaseConfig 
                     { 
-                        "postgresql", 
-                        new DatabaseConfig { FriendlyName = "PostgreSQL", CliCommand = "sudo -u postgres psql" } 
-                    },
+                        FriendlyName = "PostgreSQL", 
+                        CliCommand = "sudo -u postgres psql",
+                        BackupCommand = "sudo -u postgres pg_dumpall > {path}",
+                        ListDatabasesCommand = "sudo -u postgres psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false;\""
+                    } 
+                },
+                { 
+                    "mariadb", 
+                    new DatabaseConfig 
                     { 
-                        "mariadb", 
-                        new DatabaseConfig { FriendlyName = "MariaDB", CliCommand = "mariadb" } 
-                    },
+                        FriendlyName = "MariaDB", 
+                        CliCommand = "mariadb",
+                        BackupCommand = "sudo mariadb-dump --all-databases > {path}",
+                        ListDatabasesCommand = "sudo mysql -e \"SHOW DATABASES;\" -s --N"
+                    } 
+                },
+                { 
+                    "mongod", 
+                    new DatabaseConfig 
                     { 
-                        "mongod", 
-                        new DatabaseConfig { FriendlyName = "MongoDB", CliCommand = "mongosh" } 
-                    },
+                        FriendlyName = "MongoDB", 
+                        CliCommand = "mongosh",
+                        BackupCommand = "mongodump --archive={path}",
+                        ListDatabasesCommand = ""
+                    } 
+                },
+                { 
+                    "redis-server", 
+                    new DatabaseConfig 
                     { 
-                        "redis-server", 
-                        new DatabaseConfig { FriendlyName = "Redis", CliCommand = "redis-cli" } 
-                    }
-                };
+                        FriendlyName = "Redis", 
+                        CliCommand = "redis-cli",
+                        BackupCommand = "redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}",
+                        ListDatabasesCommand = ""
+
+                    } 
+                }
+            };
                 SaveDatabasesToFile(); 
                 return;
             }
@@ -58,6 +83,15 @@ public class SystemdScanner : IDatabaseScanner
             }
         }
 
+        public string GetListDatabasesCommandForService(string serviceName)
+        {
+            string key = serviceName.ToLower().Trim();
+            if (_supportedDatabases.TryGetValue(key, out var config))
+            {
+                return config.ListDatabasesCommand;
+            }
+            return string.Empty;
+        }
 
         private void SaveDatabasesToFile()
         {
@@ -69,19 +103,21 @@ public class SystemdScanner : IDatabaseScanner
 
 
 
-        public void RegisterDatabase(string serviceName, string friendlyName, string cliCommand)
+       public void RegisterDatabase(string serviceName, string friendlyName, string cliCommand, string backupCommand, string listDatabasesCommand)
+        {
+            string key = serviceName.ToLower().Trim();
+            if (!_supportedDatabases.ContainsKey(key))
             {
-                string key = serviceName.ToLower().Trim();
-                if (!_supportedDatabases.ContainsKey(key))
-                {
-                    _supportedDatabases.Add(key, new DatabaseConfig 
-                    { 
-                        FriendlyName = friendlyName, 
-                        CliCommand = cliCommand 
-                    });
-                    SaveDatabasesToFile();
-                }
+                _supportedDatabases.Add(key, new DatabaseConfig 
+                { 
+                    FriendlyName = friendlyName, 
+                    CliCommand = cliCommand,
+                    BackupCommand = backupCommand,
+                    ListDatabasesCommand = listDatabasesCommand
+                });
+                SaveDatabasesToFile();
             }
+        }
 
             public void UnregisterDatabase(string serviceName)
             {
@@ -103,13 +139,25 @@ public class SystemdScanner : IDatabaseScanner
         public string GetCliCommandForService(string serviceName)
         {
             string key = serviceName.ToLower().Trim();
-        
+
             if (_supportedDatabases.TryGetValue(key, out var config))
             {
                 return config.CliCommand;
-            }            if (_supportedDatabases.TryGetValue(key, out var config))
+            }
 
             return serviceName; 
+        }
+
+        public string GetBackupCommandForService(string serviceName)
+        {
+            string key = serviceName.ToLower().Trim();
+            
+            if (_supportedDatabases.TryGetValue(key, out var config))
+            {
+                return config.BackupCommand;
+            }
+            
+            return string.Empty;
         }
 
 
@@ -129,7 +177,11 @@ public class SystemdScanner : IDatabaseScanner
 
             if (aptSuccess)
             {
+                await _bash.ExecuteAsync("sudo systemctl daemon-reload");
+                await _bash.ExecuteAsync($"sudo systemctl enable {serviceName}");
+                await _bash.ExecuteAsync($"sudo systemctl start {serviceName}");
                 return (true, string.Empty);
+
             }
 
             return (false, installResult);
@@ -147,11 +199,8 @@ public class SystemdScanner : IDatabaseScanner
                     string fullCommand = kvp.Value.CliCommand;
 
                   
-                    string binaryToFind = fullCommand.Split(' ').Last(); 
-
-                    var whichStatus = await _bash.ExecuteAsync($"which {binaryToFind}");
-                    
-                    bool isInstalled = !string.IsNullOrWhiteSpace(whichStatus) && !whichStatus.Contains("not found");
+                   var serviceCheck = await _bash.ExecuteAsync($"systemctl list-unit-files {serviceName}.service");
+                   bool isInstalled = serviceCheck.Contains($"{serviceName}.service");
 
                     bool isRunning = false;
                     if (isInstalled)

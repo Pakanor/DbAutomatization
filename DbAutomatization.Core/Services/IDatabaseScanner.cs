@@ -5,11 +5,13 @@ namespace DbAutomatization.Core.Services
     public interface IDatabaseScanner
     {
         Task<List<DetectedDatabase>> ScanForDatabasesAsync();
-        void RegisterDatabase(string serviceName, string friendlyName, string cliCommand);        
+        void RegisterDatabase(string serviceName, string friendlyName, string cliCommand, string backupCommand, string listDatabasesCommand); 
         void UnregisterDatabase(string serviceName);
         Task<(bool Success, string ErrorMessage)> InstallServiceViaAptAsync(string packageName, string serviceName);
         Task<bool> DoesServiceExistAsync(string serviceName);
         string GetCliCommandForService(string serviceName);
+        string GetBackupCommandForService(string serviceName);
+        string GetListDatabasesCommandForService(string serviceName);
 
         
 

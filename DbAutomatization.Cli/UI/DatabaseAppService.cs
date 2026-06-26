@@ -84,6 +84,8 @@ public class DatabaseAppService
         Console.WriteLine("[2] Zatrzymaj (Stop)");
         Console.WriteLine("[3] Zrestartuj (Restart)");
         Console.WriteLine("[4] Wejdź do konsoli CLI");
+        Console.WriteLine("[5] backup");
+
         Console.WriteLine("[0] Powrót do menu głównego");
         Console.Write("\nWybór działania: ");
 
@@ -113,6 +115,61 @@ public class DatabaseAppService
                 string cliCommand = _scanner.GetCliCommandForService(selectedDb.ServiceName);
                 await _manager.OpenDatabaseCliAsync(selectedDb.ServiceName, cliCommand);
                 break;
+            case "5":
+                Console.WriteLine($"\n[Backup] Przygotowywanie kopii zapasowej dla {selectedDb.Name}...\n");
+                
+                string listDbCommand = _scanner.GetListDatabasesCommandForService(selectedDb.ServiceName);
+                string selectedDatabaseName = string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(listDbCommand))
+                {
+                    var internalDatabases = await _manager.GetDatabasesAsync(listDbCommand);
+
+                    if (internalDatabases.Any())
+                    {
+                        Console.WriteLine($"--- Wybierz bazę danych z silnika {selectedDb.Name} ---");
+                        for (int d = 0; d < internalDatabases.Count; d++)
+                        {
+                            Console.WriteLine($"[{d + 1}] {internalDatabases[d]}");
+                        }
+                        Console.WriteLine("[0] Anuluj backup");
+                        Console.Write("\nWybór: ");
+
+                        if (int.TryParse(Console.ReadLine(), out int internalIndex) && internalIndex > 0 && internalIndex <= internalDatabases.Count)
+                        {
+                            selectedDatabaseName = internalDatabases[internalIndex - 1];
+                        }
+                        else
+                        {
+                            Console.WriteLine("Anulowano lub wybrano niepoprawną opcję.");
+                            break;
+                        }
+                    }
+                }
+
+                string rawBackupCommand = _scanner.GetBackupCommandForService(selectedDb.ServiceName);
+                
+                if (string.IsNullOrWhiteSpace(rawBackupCommand))
+                {
+                    Console.WriteLine("[X] Błąd: Brak zdefiniowanej komendy backupu dla tej bazy w pliku konfiguracyjnym.");
+                    break;
+                }
+
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
+                string dbNamePart = !string.IsNullOrEmpty(selectedDatabaseName) ? $"_{selectedDatabaseName}" : "";
+                string fileName = $"backup_{selectedDb.ServiceName}{dbNamePart}_{timestamp}.bak";
+                string fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+
+                string finalBackupCommand = rawBackupCommand.Replace("{path}", fullPath);
+                if (!string.IsNullOrEmpty(selectedDatabaseName))
+                {
+                    finalBackupCommand = finalBackupCommand.Replace("{db}", selectedDatabaseName);
+                }
+
+                Console.WriteLine($"[Backup] Wykonywanie komendy: {finalBackupCommand}");
+                var backupResult = await _manager.CreateBackupAsync(selectedDb.ServiceName, finalBackupCommand);
+                Console.WriteLine(backupResult);
+                break;
 
             default:
                 Console.WriteLine("Niepoprawna opcja.");
@@ -124,65 +181,71 @@ public class DatabaseAppService
     }
 }
 
-   public async Task HandleAddDatabaseAsync()
-{
-    Console.WriteLine("\n--- Dodawanie nowej bazy ---");
-    
-    Console.Write("Podaj nazwę bazy w systemie (np. redis-server, postgresql): ");
-    var systemName = Console.ReadLine()?.ToLower().Trim();
-    if (string.IsNullOrWhiteSpace(systemName)) return;
-
-    Console.Write("Podaj nazwę wyświetlaną w menu (np. Redis, PostgreSQL): ");
-    var friendlyName = Console.ReadLine();
-    if (string.IsNullOrWhiteSpace(friendlyName)) return;
-
-    Console.Write($"Podaj komendę CLI do wejścia w bazę (domyślnie: '{systemName}', ENTER aby zaakceptować): ");
-    var cliCommand = Console.ReadLine()?.Trim();
-    
-    if (string.IsNullOrWhiteSpace(cliCommand))
-    {
-        cliCommand = systemName;
-    }
-
-    bool exists = await _scanner.DoesServiceExistAsync(systemName);
-
-    if (exists)
-    {
-        _scanner.RegisterDatabase(systemName, friendlyName, cliCommand);
-        Console.WriteLine($"\n[V] Baza '{friendlyName}' już istnieje w systemie i została dodana do monitorowania.");
-        return;
-    }
-
-    Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.Write($"\n[!] Baza '{systemName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
-    Console.ResetColor();
-    
-    var answer = Console.ReadLine()?.ToLower().Trim();
-
-    if (answer == "y" || answer == "yes")
-    {
-        var (success, errorMessage) = await _scanner.InstallServiceViaAptAsync(systemName, systemName);
-
-        if (success)
+        public async Task HandleAddDatabaseAsync()
         {
-            _scanner.RegisterDatabase(systemName, friendlyName, cliCommand);
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"\n[V] Sukces! Pomyślnie zainstalowano i dodano bazę {friendlyName} do monitorowania.");
-            Console.ResetColor();
-        }
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{systemName}' nie powiodła się.");
+            Console.WriteLine("\n--- Dodawanie nowej bazy ---");
+            
+            Console.Write("Podaj nazwę bazy w systemie (np. redis-server, postgresql): ");
+            var systemName = Console.ReadLine()?.ToLower().Trim();
+            if (string.IsNullOrWhiteSpace(systemName)) return;
+
+            Console.Write("Podaj nazwę wyświetlaną w menu (np. Redis, PostgreSQL): ");
+            var friendlyName = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(friendlyName)) return;
+
+            Console.Write($"Podaj komendę CLI do wejścia w bazę (domyślnie: '{systemName}', ENTER aby zaakceptować): ");
+            var cliCommand = Console.ReadLine()?.Trim();
+            if (string.IsNullOrWhiteSpace(cliCommand))
+            {
+                cliCommand = systemName;
+            }
+
+            Console.WriteLine("\nWskazówka dla backupu: Użyj {path} dla pliku wynikowego oraz opcjonalnie {db} dla nazwy bazy.");
+            Console.Write("Podaj komendę do backupu (np. sudo mariadb-dump {db} > {path}, ENTER jeśli brak): ");
+            var backupCommand = Console.ReadLine()?.Trim() ?? string.Empty;
+
+            Console.Write("Podaj komendę do listowania baz danych (np. sudo mysql -e \"SHOW DATABASES;\" -s --N, ENTER jeśli brak): ");
+            var listDatabasesCommand = Console.ReadLine()?.Trim() ?? string.Empty;
+
+            bool exists = await _scanner.DoesServiceExistAsync(systemName);
+
+            if (exists)
+            {
+                _scanner.RegisterDatabase(systemName, friendlyName, cliCommand, backupCommand, listDatabasesCommand);
+                Console.WriteLine($"\n[V] Baza '{friendlyName}' już istnieje w systemie i została dodana do monitorowania.");
+                return;
+            }
+
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write($"\n[!] Baza '{systemName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
             Console.ResetColor();
             
-            Console.WriteLine("\n--- Logi z systemu Linux ---");
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine(errorMessage);
-            Console.ResetColor();
+            var answer = Console.ReadLine()?.ToLower().Trim();
+
+            if (answer == "y" || answer == "yes")
+            {
+                var (success, errorMessage) = await _scanner.InstallServiceViaAptAsync(systemName, systemName);
+
+                if (success)
+                {
+                    _scanner.RegisterDatabase(systemName, friendlyName, cliCommand, backupCommand, listDatabasesCommand);
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine($"\n[V] Sukces! Pomyślnie zainstalowano i dodano bazę {friendlyName} do monitorowania.");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{systemName}' nie powiodła się.");
+                    Console.ResetColor();
+                    
+                    Console.WriteLine("\n--- Logi z systemu Linux ---");
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine(errorMessage);
+                    Console.ResetColor();
+                }
+            }
         }
-    }
-}
 
     public void HandleRemoveDatabase()
     {

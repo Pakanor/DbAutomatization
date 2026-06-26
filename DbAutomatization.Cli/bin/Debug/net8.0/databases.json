@@ -1,22 +1,32 @@
 {
   "postgresql": {
     "FriendlyName": "PostgreSQL",
-    "CliCommand": "sudo -u postgres psql"
+    "CliCommand": "sudo -u postgres psql",
+    "BackupCommand": "sudo -u postgres pg_dumpall \u003E {path}",
+    "ListDatabasesCommand": "sudo -u postgres psql -t -A -c \u0022SELECT datname FROM pg_database WHERE datistemplate = false;\u0022"
   },
   "mariadb": {
     "FriendlyName": "MariaDB",
-    "CliCommand": "mariadb"
+    "CliCommand": "mariadb",
+    "BackupCommand": "sudo mariadb-dump --all-databases \u003E {path}",
+    "ListDatabasesCommand": "sudo mysql -e \u0022SHOW DATABASES;\u0022 -s --N"
   },
   "mongod": {
     "FriendlyName": "MongoDB",
-    "CliCommand": "mongosh"
+    "CliCommand": "mongosh",
+    "BackupCommand": "mongodump --archive={path}",
+    "ListDatabasesCommand": ""
   },
   "redis-server": {
     "FriendlyName": "Redis",
-    "CliCommand": "redis-cli"
+    "CliCommand": "redis-cli",
+    "BackupCommand": "redis-cli SAVE \u0026\u0026 sudo cp /var/lib/redis/dump.rdb {path}",
+    "ListDatabasesCommand": ""
   },
-  "sqlite3": {
-    "FriendlyName": "Sqlite",
-    "CliCommand": "sqlite3"
+  "influxdb": {
+    "FriendlyName": "Influx",
+    "CliCommand": "influx",
+    "BackupCommand": "influx backup {path}",
+    "ListDatabasesCommand": "influx bucket list --hide-headers | awk \u0027{print $2}\u0027"
   }
 }

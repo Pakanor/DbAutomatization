@@ -42,5 +42,42 @@ public class SystemdServiceManager : IServiceManager
         await _bash.ExecuteInteractiveAsync(finalCommand);
     }
 
+    public async Task<List<string>> GetDatabasesAsync(string rawListCommand)
+        {
+            
+            if (string.IsNullOrWhiteSpace(rawListCommand)) 
+                return new List<string>();
+
+            var output = await _bash.ExecuteAsync(rawListCommand);
+            
+            return output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(db => db.Trim())
+                        .Where(db => !string.IsNullOrEmpty(db))
+                        .ToList();
+        }
+
+    public async Task<string> CreateBackupAsync(string serviceName, string rawBackupCommand)
+        {
+            if (string.IsNullOrWhiteSpace(rawBackupCommand))
+            {
+                return "Błąd: Brak zdefiniowanej komendy backupu dla tej bazy.";
+            }
+
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
+            string fileName = $"backup_{serviceName}_{timestamp}.bak";
+            string fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+
+            string finalCommand = rawBackupCommand.Replace("{path}", fullPath);
+
+            var output = await _bash.ExecuteAsync(finalCommand);
+
+            if (output.Contains("error") || output.Contains("failed"))
+            {
+                return $"[X] Coś poszło nie tak podczas backupu:\n{output}";
+            }
+
+            return $"[V] Backup wykonany pomyślnie!\nPlik zapisano w: {fullPath}";
+        }
+
     
 }
