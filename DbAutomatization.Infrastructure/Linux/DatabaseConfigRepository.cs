@@ -10,9 +10,13 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
     private readonly string _filePath;
     private Dictionary<string, DatabaseConfig> _cache = new();
 
-    public DatabaseConfigRepository()
+    public DatabaseConfigRepository() : this(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "databases.json"))
     {
-        _filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "databases.json");
+    }
+
+    internal DatabaseConfigRepository(string filePath)
+    {
+        _filePath = filePath;
         Load();
     }
 

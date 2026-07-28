@@ -1,49 +1,43 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using DbAutomatization.Core.Services;
 
 namespace DbAutomatization.Infrastructure.Linux;
 
 public class PermissionService : IPermissionService
 {
-    public bool HasSudo { get; }
+    private readonly IProcessExecutor _process;
+    private bool _hasSudo;
+    private bool _checked;
 
-    public PermissionService()
+    public bool HasSudo
     {
-        HasSudo = CheckSudoAccess();
+        get
+        {
+            if (!_checked)
+            {
+                _hasSudo = CheckSudoAsync().GetAwaiter().GetResult();
+                _checked = true;
+            }
+            return _hasSudo;
+        }
     }
 
-    private static bool CheckSudoAccess()
+    public PermissionService(IProcessExecutor process)
+    {
+        _process = process;
+    }
+
+    private async Task<bool> CheckSudoAsync()
     {
         try
         {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "sudo",
-                    ArgumentList = { "-n", "true" },
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-
-            process.Start();
-
-            if (!process.WaitForExit(5000))
-            {
-                process.Kill();
-                return false;
-            }
-
-            return process.ExitCode == 0;
+            var result = await _process.ExecuteAsync("sudo", ["-n", "true"], timeoutSeconds: 5);
+            return result.Success;
         }
-        catch (Win32Exception)
+        catch (OperationCanceledException)
         {
             return false;
         }
-        catch (InvalidOperationException)
+        catch (Exception)
         {
             return false;
         }
