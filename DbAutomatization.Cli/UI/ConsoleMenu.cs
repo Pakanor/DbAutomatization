@@ -1,25 +1,33 @@
  
 namespace DbAutomatization.Cli;
 
-public class ConsoleMenu{
-
+public class ConsoleMenu
+{
     private readonly DatabaseAppService _appService;
 
-    public ConsoleMenu(DatabaseAppService appService){
+    public ConsoleMenu(DatabaseAppService appService)
+    {
         _appService = appService;
     }
 
-    public async Task RunAsync(){
-           while (true)
+    public async Task RunAsync()
+    {
+        string modeLabel = _appService.HasSudo ? "Administrator" : "Użytkownik";
+
+        while (true)
         {
-            Console.WriteLine("\n[1] Skanuj bazy danych");
+            Console.ForegroundColor = _appService.HasSudo ? ConsoleColor.Green : ConsoleColor.Yellow;
+            Console.WriteLine($"\n=== DbAutomatization — Tryb: {modeLabel} ===");
+            Console.ResetColor();
+
+            Console.WriteLine("[1] Skanuj bazy danych");
             Console.WriteLine("[2] Zarządzaj bazą");
             Console.WriteLine("[3] Dodaj nową bazę do listy");
-            Console.WriteLine("[4] Usun bazę z listy");
+            Console.WriteLine("[4] Usuń bazę z listy");
 
             Console.WriteLine("[0] Wyjście");
             Console.Write("\nWybierz opcję: ");
-            
+
             var choice = Console.ReadLine();
 
             if (choice == "0") break;
@@ -43,14 +51,5 @@ public class ConsoleMenu{
                     break;
             }
         }
-
-
-
-
-
-
     }
-
-
-
 }

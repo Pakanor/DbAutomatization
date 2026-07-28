@@ -1,0 +1,32 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+## JetBrains Rider
+.idea/
+*.sln.iml
+
+## Visual Studio Code
+.vscode/
+*.swp
+
+## macOS
+.DS_Store
+
+## Build artifacts
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets

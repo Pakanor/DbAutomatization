@@ -1,225 +1,77 @@
 using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
-using System.Text.Json;
 
 namespace DbAutomatization.Infrastructure.Linux;
 
 public class SystemdScanner : IDatabaseScanner
 {
-    private readonly IBashExecutor _bash;
-    private readonly string _filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "databases.json");
-    private Dictionary<string, DatabaseConfig> _supportedDatabases = new();
-    
-   
+    private readonly IProcessExecutor _process;
+    private readonly IDatabaseConfigRepository _configRepo;
 
-    public SystemdScanner(IBashExecutor bash)
+    public SystemdScanner(IProcessExecutor process, IDatabaseConfigRepository configRepo)
     {
-        _bash = bash;
-        LoadDatabasesFromFile();
+        _process = process;
+        _configRepo = configRepo;
     }
 
+    public async Task<List<DetectedDatabase>> ScanForDatabasesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var results = new List<DetectedDatabase>();
 
-        private void LoadDatabasesFromFile()
+        var unitFilesResult = await _process.ExecuteAsync(
+            "systemctl",
+            ["list-unit-files", "--type=service", "--no-legend"],
+            timeoutSeconds: 15,
+            cancellationToken: cancellationToken);
+
+        var existingUnits = ParseUnitFiles(unitFilesResult.Output);
+
+        var trackedServices = _configRepo.GetAll();
+
+        foreach (var kvp in trackedServices)
         {
-            if (!File.Exists(_filePath))
-            {
-       _supportedDatabases = new Dictionary<string, DatabaseConfig>
-            {
-                { 
-                    "postgresql", 
-                    new DatabaseConfig 
-                    { 
-                        FriendlyName = "PostgreSQL", 
-                        CliCommand = "sudo -u postgres psql",
-                        BackupCommand = "sudo -u postgres pg_dumpall > {path}",
-                        ListDatabasesCommand = "sudo -u postgres psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false;\""
-                    } 
-                },
-                { 
-                    "mariadb", 
-                    new DatabaseConfig 
-                    { 
-                        FriendlyName = "MariaDB", 
-                        CliCommand = "mariadb",
-                        BackupCommand = "sudo mariadb-dump --all-databases > {path}",
-                        ListDatabasesCommand = "sudo mysql -e \"SHOW DATABASES;\" -s --N"
-                    } 
-                },
-                { 
-                    "mongod", 
-                    new DatabaseConfig 
-                    { 
-                        FriendlyName = "MongoDB", 
-                        CliCommand = "mongosh",
-                        BackupCommand = "mongodump --archive={path}",
-                        ListDatabasesCommand = ""
-                    } 
-                },
-                { 
-                    "redis-server", 
-                    new DatabaseConfig 
-                    { 
-                        FriendlyName = "Redis", 
-                        CliCommand = "redis-cli",
-                        BackupCommand = "redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}",
-                        ListDatabasesCommand = ""
+            string serviceName = kvp.Key;
+            string unitName = $"{serviceName}.service";
+            bool isInstalled = existingUnits.Contains(unitName);
 
-                    } 
-                }
-            };
-                SaveDatabasesToFile(); 
-                return;
+            bool isRunning = false;
+            if (isInstalled)
+            {
+                var activeResult = await _process.ExecuteAsync(
+                    "systemctl", ["is-active", serviceName],
+                    timeoutSeconds: 10,
+                    cancellationToken: cancellationToken);
+
+                isRunning = activeResult.Output.Trim() == "active";
             }
 
-            try
+            results.Add(new DetectedDatabase
             {
-                string jsonString = File.ReadAllText(_filePath);
-                _supportedDatabases = JsonSerializer.Deserialize<Dictionary<string, DatabaseConfig>>(jsonString) 
-                                    ?? new Dictionary<string, DatabaseConfig>();
-            }
-            catch
-            {
-                _supportedDatabases = new Dictionary<string, DatabaseConfig>();
-            }
+                Name = kvp.Value.FriendlyName,
+                ServiceName = serviceName,
+                IsInstalled = isInstalled,
+                IsRunning = isRunning
+            });
         }
 
-        public string GetListDatabasesCommandForService(string serviceName)
+        return results;
+    }
+
+    private static HashSet<string> ParseUnitFiles(string output)
+    {
+        var units = new HashSet<string>();
+
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
-            string key = serviceName.ToLower().Trim();
-            if (_supportedDatabases.TryGetValue(key, out var config))
-            {
-                return config.ListDatabasesCommand;
-            }
-            return string.Empty;
+            string trimmed = line.Trim();
+            int spaceIndex = trimmed.IndexOf(' ');
+            string unitName = spaceIndex > 0 ? trimmed[..spaceIndex] : trimmed;
+
+            if (unitName.EndsWith(".service"))
+                units.Add(unitName);
         }
 
-        private void SaveDatabasesToFile()
-        {
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            string jsonString = JsonSerializer.Serialize(_supportedDatabases, options);
-            File.WriteAllText(_filePath, jsonString);
-        }
-
-
-
-
-       public void RegisterDatabase(string serviceName, string friendlyName, string cliCommand, string backupCommand, string listDatabasesCommand)
-        {
-            string key = serviceName.ToLower().Trim();
-            if (!_supportedDatabases.ContainsKey(key))
-            {
-                _supportedDatabases.Add(key, new DatabaseConfig 
-                { 
-                    FriendlyName = friendlyName, 
-                    CliCommand = cliCommand,
-                    BackupCommand = backupCommand,
-                    ListDatabasesCommand = listDatabasesCommand
-                });
-                SaveDatabasesToFile();
-            }
-        }
-
-            public void UnregisterDatabase(string serviceName)
-            {
-                string key = serviceName.ToLower().Trim();
-                if(_supportedDatabases.ContainsKey(key)){
-                _supportedDatabases.Remove(key);
-                    SaveDatabasesToFile();
-                }
-                }
-
-        public async Task<bool> DoesServiceExistAsync(string serviceName)
-{
-            string key = serviceName.ToLower().Trim();
-            
-            var whichStatus = await _bash.ExecuteAsync($"which {key}");
-            
-            return !string.IsNullOrWhiteSpace(whichStatus) && !whichStatus.Contains("not found");
-        }
-        public string GetCliCommandForService(string serviceName)
-        {
-            string key = serviceName.ToLower().Trim();
-
-            if (_supportedDatabases.TryGetValue(key, out var config))
-            {
-                return config.CliCommand;
-            }
-
-            return serviceName; 
-        }
-
-        public string GetBackupCommandForService(string serviceName)
-        {
-            string key = serviceName.ToLower().Trim();
-            
-            if (_supportedDatabases.TryGetValue(key, out var config))
-            {
-                return config.BackupCommand;
-            }
-            
-            return string.Empty;
-        }
-
-
-
-        public async Task<(bool Success, string ErrorMessage)> InstallServiceViaAptAsync(string packageName, string serviceName)
-        {
-            Console.WriteLine($"\n[APT] Aktualizacja repozytoriów...");
-            await _bash.ExecuteAsync("sudo apt update -y");
-
-            Console.WriteLine($"[APT] Instalacja pakietu {packageName}... To może chwilę potrwać.");
-            var installResult = await _bash.ExecuteAsync($"sudo apt install -y {packageName}");
-
-           
-            bool aptSuccess = installResult.Contains("Instalowane:") || 
-                            installResult.Contains("jest już w najnowszej wersji") ||
-                            installResult.Contains("is already the newest version");
-
-            if (aptSuccess)
-            {
-                await _bash.ExecuteAsync("sudo systemctl daemon-reload");
-                await _bash.ExecuteAsync($"sudo systemctl enable {serviceName}");
-                await _bash.ExecuteAsync($"sudo systemctl start {serviceName}");
-                return (true, string.Empty);
-
-            }
-
-            return (false, installResult);
-        }
-
-
-        public async Task<List<DetectedDatabase>> ScanForDatabasesAsync()
-            {
-                var results = new List<DetectedDatabase>();
-
-                foreach (var kvp in _supportedDatabases)
-                {
-                    string serviceName = kvp.Key;
-                    string friendlyName = kvp.Value.FriendlyName;
-                    string fullCommand = kvp.Value.CliCommand;
-
-                  
-                   var serviceCheck = await _bash.ExecuteAsync($"systemctl list-unit-files {serviceName}.service");
-                   bool isInstalled = serviceCheck.Contains($"{serviceName}.service");
-
-                    bool isRunning = false;
-                    if (isInstalled)
-                    {
-                        
-                        var activeStatus = await _bash.ExecuteAsync($"systemctl is-active {serviceName}");
-                        isRunning = activeStatus.Trim() == "active";
-                    }
-
-                    results.Add(new DetectedDatabase
-                    {
-                        Name = friendlyName,
-                        ServiceName = serviceName,
-                        IsInstalled = isInstalled,
-                        IsRunning = isRunning
-                    });
-                }
-
-                return results;
-            }
-
+        return units;
+    }
 }

@@ -9,16 +9,18 @@ class Program
     static async Task Main(string[] args)
     {
         var serviceProvider = new ServiceCollection()
-    .AddSingleton<IBashExecutor, BashExecutor>()
-    .AddTransient<IDatabaseScanner, SystemdScanner>()
-    .AddTransient<IServiceManager, SystemdServiceManager>()
-    .AddTransient<DatabaseAppService>() 
-    .AddTransient<ConsoleMenu>()       
-    .BuildServiceProvider();
+            .AddSingleton<IProcessExecutor, ProcessExecutor>()
+            .AddSingleton<IDatabaseConfigRepository, DatabaseConfigRepository>()
+            .AddSingleton<IPermissionService, PermissionService>()
+            .AddTransient<IAptPackageManager, AptPackageManager>()
+            .AddTransient<IBackupService, BackupService>()
+            .AddTransient<IDatabaseScanner, SystemdScanner>()
+            .AddTransient<IServiceManager, SystemdServiceManager>()
+            .AddTransient<DatabaseAppService>()
+            .AddTransient<ConsoleMenu>()
+            .BuildServiceProvider();
 
-    var menu = serviceProvider.GetRequiredService<ConsoleMenu>();
-    await menu.RunAsync();
+        var menu = serviceProvider.GetRequiredService<ConsoleMenu>();
+        await menu.RunAsync();
     }
-
-    
 }
