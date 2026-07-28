@@ -55,9 +55,9 @@ In User mode, systemd/apt operations are blocked with a clear message.
 | Field | Type | Description |
 |---|---|---|
 | `FriendlyName` | `string` | Display name in menu |
-| `CliCommand` | `string` | Interactive CLI command (e.g. `psql`, `mongosh`) |
-| `BackupCommand` | `string` | Backup command template with `{path}` and `{db}` placeholders |
-| `ListDatabasesCommand` | `string` | Command to list databases within the engine |
+| `CliCommand` | `string[]` | Interactive CLI command (e.g. `["psql"]`) |
+| `BackupCommand` | `string[]` | Backup command template with `{path}` and `{db}` placeholders |
+| `ListDatabasesCommand` | `string[]` | Command to list databases within the engine |
 
 ### `DetectedDatabase`
 | Field | Type | Description |
@@ -156,12 +156,14 @@ Stored in the application's bin directory. Created automatically with sensible d
 {
   "postgresql": {
     "FriendlyName": "PostgreSQL",
-    "CliCommand": "sudo -u postgres psql",
-    "BackupCommand": "sudo -u postgres pg_dumpall",
-    "ListDatabasesCommand": "sudo -u postgres psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false;\""
+    "CliCommand": ["sudo", "-u", "postgres", "psql"],
+    "BackupCommand": ["sudo", "-u", "postgres", "pg_dumpall"],
+    "ListDatabasesCommand": ["sudo", "-u", "postgres", "psql", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;"]
   }
 }
 ```
+
+Legacy `string` format is auto-migrated via `CommandArrayConverter` — old format with `>` redirect is cleaned up on load.
 
 **Placeholders:**
 - `{path}` — backup file path (auto-generated). If present in the command, substituted directly (e.g. `mongodump --archive={path}`). If absent, stdout is piped to the file automatically.
@@ -217,9 +219,18 @@ Stored in the application's bin directory. Created automatically with sensible d
 
 ## Future Improvements
 
-- [ ] Unit + integration tests for all services
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] `CommandArrayConverter` in `DatabaseConfig` — handle spaces inside quoted strings when splitting input
 - [ ] `SystemdScanner` — batch `systemctl is-active` calls into a single invocation
-- [ ] Add `InfluxDB` to default `databases.json` config
 - [ ] Windows support via Docker-based database engines
+
+## Tests
+
+The `DbAutomatization.Tests` xUnit project contains 19 unit tests covering all layers:
+
+| Test file | Tests | What it covers |
+|---|---|---|
+| `CommandArrayConverterTests.cs` | 6 | Old/new JSON format, empty/null, shell wrapping |
+| `BackupServiceTests.cs` | 6 | `{path}`/`{db}` substitution, streaming, shell mode, missing service |
+| `DatabaseConfigRepositoryTests.cs` | 3 | Corrupted JSON, default creation, legacy redirect migration |
+| `PermissionServiceTests.cs` | 4 | Sudo true/false, exception handling, caching |
+
+Run: `dotnet test`
