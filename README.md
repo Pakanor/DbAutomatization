@@ -15,7 +15,7 @@ DbAutomatization.sln
 
 | Layer | Project | Dependencies | Responsibility |
 |---|---|---|---|
-| **Core** | `DbAutomatization.Core` | none | Models, interfaces, exceptions, utility `CommandParser`, orchestration `BackupService` |
+| **Core** | `DbAutomatization.Core` | none | Models, interfaces, exceptions, orchestration `BackupService` |
 | **Infrastructure** | `DbAutomatization.Infrastructure` | Core | Linux implementations: `ProcessExecutor`, `PermissionService`, `DatabaseConfigRepository`, `AptPackageManager`, `SystemdScanner`, `SystemdServiceManager` |
 | **CLI** | `DbAutomatization.Cli` | Core + Infrastructure + DI | Entry point, console menu, UI business logic |
 
@@ -219,7 +219,7 @@ Stored in the application's bin directory. Created automatically with sensible d
 
 - [ ] Unit + integration tests for all services
 - [ ] CI/CD pipeline (GitHub Actions)
-- [ ] `CommandParser` — handle escaped quotes inside quoted strings
+- [ ] `CommandArrayConverter` in `DatabaseConfig` — handle spaces inside quoted strings when splitting input
 - [ ] `SystemdScanner` — batch `systemctl is-active` calls into a single invocation
 - [ ] Add `InfluxDB` to default `databases.json` config
 - [ ] Windows support via Docker-based database engines

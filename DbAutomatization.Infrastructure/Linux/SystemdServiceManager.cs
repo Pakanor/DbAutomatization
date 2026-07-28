@@ -41,29 +41,15 @@ public class SystemdServiceManager : IServiceManager
     public async Task<List<string>> GetDatabasesAsync(string serviceName, CancellationToken cancellationToken = default)
     {
         var config = _configRepo.Get(serviceName);
-        if (config == null || string.IsNullOrWhiteSpace(config.ListDatabasesCommand))
+        if (config == null || config.ListDatabasesCommand == null || config.ListDatabasesCommand.Length == 0)
             return new List<string>();
 
-        bool needsShell = config.ListDatabasesCommand.Contains('>')
-                       || config.ListDatabasesCommand.Contains('|')
-                       || config.ListDatabasesCommand.Contains('&');
+        string[] commandArgs = config.ListDatabasesCommand;
 
-        ProcessResult result;
-        if (needsShell)
-        {
-            result = await _process.ExecuteAsync(
-                "/bin/bash", ["-c", config.ListDatabasesCommand],
-                timeoutSeconds: 30,
-                cancellationToken: cancellationToken);
-        }
-        else
-        {
-            var (fileName, args) = CommandParser.Parse(config.ListDatabasesCommand);
-            result = await _process.ExecuteAsync(
-                fileName, args,
-                timeoutSeconds: 30,
-                cancellationToken: cancellationToken);
-        }
+        ProcessResult result = await _process.ExecuteAsync(
+            commandArgs[0], commandArgs[1..],
+            timeoutSeconds: 30,
+            cancellationToken: cancellationToken);
 
         return result.Output
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
@@ -72,11 +58,11 @@ public class SystemdServiceManager : IServiceManager
             .ToList();
     }
 
-    public async Task OpenDatabaseCliAsync(string serviceName, string cliCommand, CancellationToken cancellationToken = default)
+    public async Task OpenDatabaseCliAsync(string serviceName, string[] cliCommand, CancellationToken cancellationToken = default)
     {
-        string finalCommand = string.IsNullOrWhiteSpace(cliCommand) ? serviceName : cliCommand;
+        if (cliCommand == null || cliCommand.Length == 0)
+            cliCommand = [serviceName];
 
-        var (fileName, args) = CommandParser.Parse(finalCommand);
-        await _process.ExecuteInteractiveAsync(fileName, args, cancellationToken);
+        await _process.ExecuteInteractiveAsync(cliCommand[0], cliCommand[1..], cancellationToken);
     }
 }

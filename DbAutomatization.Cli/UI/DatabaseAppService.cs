@@ -156,7 +156,7 @@ public class DatabaseAppService
                 {
                     Console.WriteLine($"\nOtwieranie konsoli interaktywnej dla {selectedDb.Name}...\n");
                     var config = _configRepo.Get(selectedDb.ServiceName);
-                    string cliCommand = config?.CliCommand ?? selectedDb.ServiceName;
+                    string[] cliCommand = config?.CliCommand ?? [selectedDb.ServiceName];
                     await _manager.OpenDatabaseCliAsync(selectedDb.ServiceName, cliCommand);
                     break;
                 }
@@ -222,16 +222,23 @@ public class DatabaseAppService
         if (string.IsNullOrWhiteSpace(friendlyName)) return;
 
         Console.Write($"Podaj komendę CLI do wejścia w bazę (domyślnie: '{systemName}', ENTER aby zaakceptować): ");
-        var cliCommand = Console.ReadLine()?.Trim();
-        if (string.IsNullOrWhiteSpace(cliCommand))
-            cliCommand = systemName;
+        var cliInput = Console.ReadLine()?.Trim();
+        string[] cliCommand = string.IsNullOrWhiteSpace(cliInput)
+            ? [systemName]
+            : cliInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         Console.WriteLine("\nWskazówka dla backupu: Użyj {path} dla pliku wynikowego oraz opcjonalnie {db} dla nazwy bazy.");
-        Console.Write("Podaj komendę do backupu (np. sudo mariadb-dump {db} > {path}, ENTER jeśli brak): ");
-        var backupCommand = Console.ReadLine()?.Trim() ?? string.Empty;
+        Console.Write("Podaj komendę do backupu (elementy rozdziel spacją, ENTER jeśli brak): ");
+        var backupInput = Console.ReadLine()?.Trim();
+        string[] backupCommand = string.IsNullOrWhiteSpace(backupInput)
+            ? []
+            : backupInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        Console.Write("Podaj komendę do listowania baz danych (np. sudo mysql -e \"SHOW DATABASES;\" -s --N, ENTER jeśli brak): ");
-        var listDatabasesCommand = Console.ReadLine()?.Trim() ?? string.Empty;
+        Console.Write("Podaj komendę do listowania baz danych (elementy rozdziel spacją, ENTER jeśli brak): ");
+        var listInput = Console.ReadLine()?.Trim();
+        string[] listDatabasesCommand = string.IsNullOrWhiteSpace(listInput)
+            ? []
+            : listInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         bool exists = await _apt.DoesPackageExistAsync(systemName);
 

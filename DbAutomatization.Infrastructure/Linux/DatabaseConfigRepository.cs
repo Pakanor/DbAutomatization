@@ -82,20 +82,39 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
         foreach (var key in _cache.Keys)
         {
             var config = _cache[key];
+            var migrated = RemoveShellRedirect(config.BackupCommand);
 
-            if (config.BackupCommand != null && config.BackupCommand.Contains("> {path}"))
+            if (migrated != null)
             {
-                config.BackupCommand = config.BackupCommand
-                    .Replace(" > {path}", "")
-                    .Replace(">{path}", "")
-                    .Trim();
-
+                config.BackupCommand = migrated;
                 changed = true;
             }
         }
 
         if (changed)
             Save();
+    }
+
+    private static string[]? RemoveShellRedirect(string[] args)
+    {
+        if (args == null || args.Length == 0)
+            return null;
+
+        var list = new List<string>(args.Length);
+        bool changed = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == ">" && i + 1 < args.Length && args[i + 1] == "{path}")
+            {
+                i++;
+                changed = true;
+                continue;
+            }
+            list.Add(args[i]);
+        }
+
+        return changed ? [.. list] : null;
     }
 
     private static string NormalizeKey(string serviceName) =>
@@ -110,9 +129,9 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "PostgreSQL",
-                    CliCommand = "sudo -u postgres psql",
-                    BackupCommand = "sudo -u postgres pg_dumpall",
-                    ListDatabasesCommand = "sudo -u postgres psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false;\""
+                    CliCommand = ["sudo", "-u", "postgres", "psql"],
+                    BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
+                    ListDatabasesCommand = ["sudo", "-u", "postgres", "psql", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;"]
                 }
             },
             {
@@ -120,9 +139,9 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "MariaDB",
-                    CliCommand = "mariadb",
-                    BackupCommand = "sudo mariadb-dump --all-databases",
-                    ListDatabasesCommand = "sudo mysql -e \"SHOW DATABASES;\" -s --N"
+                    CliCommand = ["mariadb"],
+                    BackupCommand = ["sudo", "mariadb-dump", "--all-databases"],
+                    ListDatabasesCommand = ["sudo", "mysql", "-e", "SHOW DATABASES;", "-s", "--N"]
                 }
             },
             {
@@ -130,9 +149,9 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "MongoDB",
-                    CliCommand = "mongosh",
-                    BackupCommand = "mongodump --archive={path}",
-                    ListDatabasesCommand = ""
+                    CliCommand = ["mongosh"],
+                    BackupCommand = ["mongodump", "--archive={path}"],
+                    ListDatabasesCommand = []
                 }
             },
             {
@@ -140,9 +159,9 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "Redis",
-                    CliCommand = "redis-cli",
-                    BackupCommand = "redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}",
-                    ListDatabasesCommand = ""
+                    CliCommand = ["redis-cli"],
+                    BackupCommand = ["/bin/bash", "-c", "redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}"],
+                    ListDatabasesCommand = []
                 }
             }
         };

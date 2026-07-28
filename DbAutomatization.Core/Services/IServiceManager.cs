@@ -6,6 +6,6 @@ namespace DbAutomatization.Core.Services
         Task StopServiceAsync(string serviceName, CancellationToken cancellationToken = default);
         Task RestartServiceAsync(string serviceName, CancellationToken cancellationToken = default);
         Task<List<string>> GetDatabasesAsync(string serviceName, CancellationToken cancellationToken = default);
-        Task OpenDatabaseCliAsync(string serviceName, string cliCommand, CancellationToken cancellationToken = default);
+        Task OpenDatabaseCliAsync(string serviceName, string[] cliCommand, CancellationToken cancellationToken = default);
     }
 }

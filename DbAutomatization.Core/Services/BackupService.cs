@@ -19,7 +19,7 @@ public class BackupService : IBackupService
         CancellationToken cancellationToken = default)
     {
         var config = _configRepo.Get(serviceName);
-        if (config == null || string.IsNullOrWhiteSpace(config.BackupCommand))
+        if (config == null || config.BackupCommand == null || config.BackupCommand.Length == 0)
         {
             return new BackupResult(
                 string.Empty,
@@ -32,30 +32,28 @@ public class BackupService : IBackupService
         string fileName = $"backup_{serviceName}{dbNamePart}_{timestamp}.bak";
         string fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
 
-        string finalCommand = config.BackupCommand.Replace("{path}", fullPath);
+        string[] finalArgs = config.BackupCommand
+            .Select(arg => arg.Replace("{path}", fullPath))
+            .ToArray();
 
         if (!string.IsNullOrEmpty(databaseName))
-            finalCommand = finalCommand.Replace("{db}", databaseName);
+            finalArgs = finalArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
 
-        bool needsShell = finalCommand.Contains("&&")
-                       || finalCommand.Contains('|')
-                       || finalCommand.Contains(';');
-
-        var (exeName, args) = CommandParser.Parse(finalCommand);
-        bool hasPathInTemplate = config.BackupCommand.Contains("{path}");
+        bool hasPathInTemplate = config.BackupCommand.Any(arg => arg.Contains("{path}"));
+        bool needsShell = finalArgs.Any(arg => arg.Contains("&&") || arg.Contains('|') || arg.Contains(';'));
 
         ProcessResult result;
         if (needsShell)
         {
             result = await _process.ExecuteAsync(
-                "/bin/bash", ["-c", finalCommand],
+                finalArgs[0], finalArgs[1..],
                 timeoutSeconds: 300,
                 cancellationToken: cancellationToken);
         }
         else if (hasPathInTemplate)
         {
             result = await _process.ExecuteAsync(
-                exeName, args,
+                finalArgs[0], finalArgs[1..],
                 timeoutSeconds: 300,
                 cancellationToken: cancellationToken);
         }
@@ -63,7 +61,7 @@ public class BackupService : IBackupService
         {
             using var fileStream = File.Create(fullPath);
             result = await _process.ExecuteAndStreamOutputAsync(
-                exeName, args, fileStream,
+                finalArgs[0], finalArgs[1..], fileStream,
                 timeoutSeconds: 300,
                 cancellationToken: cancellationToken);
         }
