@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using DbAutomatization.Core.Exceptions;
 using DbAutomatization.Core.Services;
 using DbAutomatization.Infrastructure.Linux;
 
@@ -6,21 +7,65 @@ namespace DbAutomatization.Cli;
 
 class Program
 {
-    static async Task Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
-        var serviceProvider = new ServiceCollection()
-            .AddSingleton<IProcessExecutor, ProcessExecutor>()
-            .AddSingleton<IDatabaseConfigRepository, DatabaseConfigRepository>()
-            .AddSingleton<IPermissionService, PermissionService>()
-            .AddTransient<IAptPackageManager, AptPackageManager>()
-            .AddTransient<IBackupService, BackupService>()
-            .AddTransient<IDatabaseScanner, SystemdScanner>()
-            .AddTransient<IServiceManager, SystemdServiceManager>()
-            .AddTransient<DatabaseAppService>()
-            .AddTransient<ConsoleMenu>()
-            .BuildServiceProvider();
+        try
+        {
+            var serviceProvider = new ServiceCollection()
+                .AddSingleton<IProcessExecutor, ProcessExecutor>()
+                .AddSingleton<IDatabaseConfigRepository, DatabaseConfigRepository>()
+                .AddSingleton<IPermissionService, PermissionService>()
+                .AddSingleton<IBackupRetentionManager, BackupRetentionManager>()
+                .AddTransient<IAptPackageManager, AptPackageManager>()
+                .AddTransient<IBackupService, BackupService>()
+                .AddTransient<IDatabaseScanner, SystemdScanner>()
+                .AddTransient<IServiceManager, SystemdServiceManager>()
+                .AddTransient<DatabaseAppService>()
+                .AddTransient<ConsoleMenu>()
+                .BuildServiceProvider();
 
-        var menu = serviceProvider.GetRequiredService<ConsoleMenu>();
-        await menu.RunAsync();
+            var menu = serviceProvider.GetRequiredService<ConsoleMenu>();
+            await menu.RunAsync();
+            return 0;
+        }
+        catch (DatabaseConfigurationException ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("\n[X] Błąd konfiguracji:");
+            Console.ResetColor();
+            Console.WriteLine($"  {ex.Message}");
+            Console.WriteLine($"  Szczegóły: {ex.InnerException?.Message}");
+
+            Console.WriteLine("\n--- Opcje naprawy ---");
+            Console.WriteLine("[1] Przywróć domyślną konfigurację (usunie obecny plik i stworzy nowy)");
+            Console.WriteLine("[2] Wyjdź z programu");
+            Console.Write("\nWybierz opcję: ");
+
+            var choice = Console.ReadLine()?.Trim();
+            if (choice == "1")
+            {
+                try
+                {
+                    string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "databases.json");
+                    if (File.Exists(configPath))
+                        File.Delete(configPath);
+
+                    Console.WriteLine("Przywracanie domyślnej konfiguracji...");
+                    var freshRepo = new DatabaseConfigRepository();
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("[V] Konfiguracja została przywrócona. Uruchom program ponownie.");
+                    Console.ResetColor();
+                }
+                catch (Exception restoreEx)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"[X] Nie udało się przywrócić konfiguracji: {restoreEx.Message}");
+                    Console.ResetColor();
+                }
+            }
+
+            return 1;
+        }
     }
+
 }

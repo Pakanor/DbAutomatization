@@ -44,8 +44,12 @@ public class DatabaseConfigRepositoryTests
                 ["sudo", "-u", "postgres", "pg_dumpall"]);
             all["mariadb"].BackupCommand.Should().BeEquivalentTo(
                 ["sudo", "mariadb-dump", "--all-databases"]);
-            all["redis-server"].BackupCommand[0].Should().Be("/bin/bash");
-            all["redis-server"].BackupCommand[1].Should().Be("-c");
+            all["redis-server"].PreBackupCommand.Should().BeEquivalentTo(["redis-cli", "SAVE"]);
+            all["redis-server"].BackupCommand.Should().BeEquivalentTo(["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"]);
+            all.Should().ContainKey("influxdb");
+            all["influxdb"].FriendlyName.Should().Be("InfluxDB");
+            all["influxdb"].ListDatabasesCommand.Should().BeEquivalentTo(["influx", "bucket", "list", "--hide-headers"]);
+            all["influxdb"].OutputColumnIndex.Should().Be(1);
         }
         finally
         {

@@ -51,11 +51,21 @@ public class SystemdServiceManager : IServiceManager
             timeoutSeconds: 30,
             cancellationToken: cancellationToken);
 
-        return result.Output
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(db => db.Trim())
-            .Where(db => !string.IsNullOrEmpty(db))
-            .ToList();
+        int col = config.OutputColumnIndex;
+        var databases = new List<string>();
+        foreach (string line in result.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            string trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed))
+                continue;
+
+            string[] parts = trimmed.Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries);
+            string name = col > 0 && parts.Length > col ? parts[col] : parts[0];
+
+            if (!string.IsNullOrEmpty(name))
+                databases.Add(name);
+        }
+        return databases;
     }
 
     public async Task OpenDatabaseCliAsync(string serviceName, string[] cliCommand, CancellationToken cancellationToken = default)

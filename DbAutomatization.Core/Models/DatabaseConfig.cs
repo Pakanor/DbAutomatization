@@ -14,7 +14,16 @@ public class DatabaseConfig
     public string[] BackupCommand { get; set; } = [];
 
     [JsonConverter(typeof(CommandArrayConverter))]
+    public string[] PreBackupCommand { get; set; } = [];
+
+    [JsonConverter(typeof(CommandArrayConverter))]
     public string[] ListDatabasesCommand { get; set; } = [];
+
+    public int BackupTimeoutSeconds { get; set; } = 300;
+
+    public int RetentionCount { get; set; } = 0;
+
+    public int OutputColumnIndex { get; set; } = 0;
 }
 
 public class CommandArrayConverter : JsonConverter<string[]>
@@ -53,14 +62,6 @@ public class CommandArrayConverter : JsonConverter<string[]>
     {
         if (string.IsNullOrWhiteSpace(command))
             return [];
-
-        bool needsShell = command.Contains('|')
-                       || command.Contains('>')
-                       || command.Contains("&&")
-                       || command.Contains(';');
-
-        if (needsShell)
-            return ["/bin/bash", "-c", command];
 
         return command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
     }

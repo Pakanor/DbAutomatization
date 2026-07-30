@@ -9,13 +9,15 @@ public class BackupServiceTests
 {
     private readonly Mock<IProcessExecutor> _processMock;
     private readonly Mock<IDatabaseConfigRepository> _configRepoMock;
+    private readonly Mock<IBackupRetentionManager> _retentionMock;
     private readonly BackupService _service;
 
     public BackupServiceTests()
     {
         _processMock = new Mock<IProcessExecutor>();
         _configRepoMock = new Mock<IDatabaseConfigRepository>();
-        _service = new BackupService(_configRepoMock.Object, _processMock.Object);
+        _retentionMock = new Mock<IBackupRetentionManager>();
+        _service = new BackupService(_configRepoMock.Object, _processMock.Object, _retentionMock.Object);
     }
 
     [Fact]
@@ -79,32 +81,151 @@ public class BackupServiceTests
     }
 
     [Fact]
-    public async Task ShellCommand_PassesThroughAsIs()
+    public async Task PreBackupCommand_ExecutesBeforeMainBackup()
     {
         var config = new DatabaseConfig
         {
             FriendlyName = "Redis",
-            BackupCommand = ["/bin/bash", "-c", "redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}"]
+            PreBackupCommand = ["redis-cli", "SAVE"],
+            BackupCommand = ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("redis-server")).Returns(config);
+
+        _processMock
+            .SetupSequence(p => p.ExecuteAsync(
+                It.IsAny<string>(),
+                It.IsAny<string[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("redis-server");
+
+        result.Success.Should().BeTrue();
+
+        _processMock.Verify(p => p.ExecuteAsync(
+            "redis-cli",
+            It.Is<string[]>(args => args[0] == "SAVE"),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _processMock.Verify(p => p.ExecuteAsync(
+            "sudo",
+            It.Is<string[]>(args => args[0] == "cp"),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PreBackupCommand_Failure_ReturnsFailure()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "Redis",
+            PreBackupCommand = ["redis-cli", "SAVE"],
+            BackupCommand = ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"]
         };
 
         _configRepoMock.Setup(r => r.Get("redis-server")).Returns(config);
 
         _processMock
             .Setup(p => p.ExecuteAsync(
-                "/bin/bash",
-                It.Is<string[]>(args => args[0] == "-c" && args[1].Contains("redis-cli SAVE")),
+                "redis-cli",
+                It.IsAny<string[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "SAVE failed", 1));
+
+        var result = await _service.CreateBackupAsync("redis-server");
+
+        result.Success.Should().BeFalse();
+        result.Message.Should().Contain("Pre-backup command failed");
+    }
+
+    [Fact]
+    public async Task UsesConfigurableTimeout()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
+            BackupTimeoutSeconds = 600
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "sudo",
+                It.Is<string[]>(args => args.Contains("pg_dumpall")),
+                It.IsAny<Stream>(),
+                600,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("postgresql");
+
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RetentionIsCalledOnSuccess()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "MongoDB",
+            BackupCommand = ["mongodump", "--archive={path}"],
+            RetentionCount = 5
+        };
+
+        _configRepoMock.Setup(r => r.Get("mongod")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "mongodump",
+                It.IsAny<string[]>(),
                 It.IsAny<int>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessResult("", "", 0));
 
-        var result = await _service.CreateBackupAsync("redis-server");
+        var result = await _service.CreateBackupAsync("mongod");
 
         result.Success.Should().BeTrue();
-        _processMock.Verify(p => p.ExecuteAsync(
-            "/bin/bash",
-            It.IsAny<string[]>(),
-            It.IsAny<int>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+        _retentionMock.Verify(r => r.CleanupAsync(
+            It.IsAny<string>(),
+            "backup_mongod",
+            5), Times.Once);
+    }
+
+    [Fact]
+    public async Task RetentionIsNotCalledOnFailure()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "MongoDB",
+            BackupCommand = ["mongodump", "--archive={path}"],
+            RetentionCount = 5
+        };
+
+        _configRepoMock.Setup(r => r.Get("mongod")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "mongodump",
+                It.IsAny<string[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "error", 1));
+
+        var result = await _service.CreateBackupAsync("mongod");
+
+        result.Success.Should().BeFalse();
+        _retentionMock.Verify(r => r.CleanupAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<int>()), Times.Never);
     }
 
     [Fact]

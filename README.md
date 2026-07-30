@@ -52,12 +52,16 @@ In User mode, systemd/apt operations are blocked with a clear message.
 ## Models
 
 ### `DatabaseConfig`
-| Field | Type | Description |
-|---|---|---|
-| `FriendlyName` | `string` | Display name in menu |
-| `CliCommand` | `string[]` | Interactive CLI command (e.g. `["psql"]`) |
-| `BackupCommand` | `string[]` | Backup command template with `{path}` and `{db}` placeholders |
-| `ListDatabasesCommand` | `string[]` | Command to list databases within the engine |
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `FriendlyName` | `string` | — | Display name in menu |
+| `CliCommand` | `string[]` | — | Interactive CLI command (e.g. `["psql"]`) |
+| `BackupCommand` | `string[]` | — | Backup command template with `{path}` and `{db}` placeholders |
+| `ListDatabasesCommand` | `string[]` | — | Command to list databases within the engine |
+| `PreBackupCommand` | `string[]` | — | Command executed before backup (e.g. `["redis-cli", "SAVE"]`) |
+| `BackupTimeoutSeconds` | `int` | `300` | Per-database backup timeout |
+| `RetentionCount` | `int` | `0` | Max backup files to keep (0 = unlimited) |
+| `OutputColumnIndex` | `int` | `0` | Column index for parsing tabular `ListDatabasesCommand` output (InfluxDB uses `1`) |
 
 ### `DetectedDatabase`
 | Field | Type | Description |
@@ -130,21 +134,26 @@ In User mode, systemd/apt operations are blocked with a clear message.
 ### `IBackupService` — Backup orchestration
 | Method | Description |
 |---|---|
-| `CreateBackupAsync(...)` | Generates filename with timestamp, creates a `FileStream`, pipes process stdout via `ExecuteAndStreamOutputAsync`. No shell redirect. |
+| `CreateBackupAsync(...)` | Executes `PreBackupCommand` (if set), then backup. Generates filename with ms‑precision timestamp, creates a `FileStream`, pipes process stdout via `ExecuteAndStreamOutputAsync`. Runs retention cleanup on success. |
+
+### `IBackupRetentionManager` — Retention cleanup
+| Method | Description |
+|---|---|
+| `CleanupAsync(directory, filePrefix, retentionCount)` | Scans directory, sorts by `LastWriteTime`, removes oldest files beyond `retentionCount`. |
 
 ---
 
 ## Supported Databases
 
-| Database | Service | CLI | Backup command | List databases |
-|---|---|---|---|---|
-| **PostgreSQL** | `postgresql` | `sudo -u postgres psql` | `sudo -u postgres pg_dumpall` | `psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;"` |
-| **MariaDB** | `mariadb` | `mariadb` | `sudo mariadb-dump --all-databases` | `sudo mysql -e "SHOW DATABASES;" -s --N` |
-| **MongoDB** | `mongod` | `mongosh` | `mongodump --archive={path}` | _(none)_ |
-| **Redis** | `redis-server` | `redis-cli` | `redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}` | _(none)_ |
-| **InfluxDB** | `influxdb` | `influx` | `influx backup {path}` | `influx bucket list --hide-headers \| awk '{print $2}'` |
+| Database | Service | CLI | PreBackupCommand | Backup command | List databases |
+|---|---|---|---|---|---|---|
+| **PostgreSQL** | `postgresql` | `sudo -u postgres psql` | — | `sudo -u postgres pg_dumpall` | `psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false;"` |
+| **MariaDB** | `mariadb` | `mariadb` | — | `sudo mariadb-dump --all-databases` | `sudo mysql -e "SHOW DATABASES;" -s --N` |
+| **MongoDB** | `mongod` | `mongosh` | — | `mongodump --archive={path}` | _(none)_ |
+| **Redis** | `redis-server` | `redis-cli` | `redis-cli SAVE` | `sudo cp /var/lib/redis/dump.rdb {path}` | _(none)_ |
+| **InfluxDB** | `influxdb` | `influx` | — | `influx backup {path}` | `influx bucket list --hide-headers` (`OutputColumnIndex: 1`) |
 
-Backup methods: stdout → FileStream (PostgreSQL, MariaDB), `{path}` in argument (MongoDB, InfluxDB), shell (Redis).
+Backup methods: stdout → FileStream (PostgreSQL, MariaDB), `{path}` in argument (MongoDB, Redis, InfluxDB). No shell involved.
 
 ---
 
@@ -158,12 +167,30 @@ Stored in the application's bin directory. Created automatically with sensible d
     "FriendlyName": "PostgreSQL",
     "CliCommand": ["sudo", "-u", "postgres", "psql"],
     "BackupCommand": ["sudo", "-u", "postgres", "pg_dumpall"],
-    "ListDatabasesCommand": ["sudo", "-u", "postgres", "psql", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;"]
+    "ListDatabasesCommand": ["sudo", "-u", "postgres", "psql", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;"],
+    "PreBackupCommand": [],
+    "BackupTimeoutSeconds": 300,
+    "RetentionCount": 0,
+    "OutputColumnIndex": 0
+  },
+  "redis-server": {
+    "FriendlyName": "Redis",
+    "CliCommand": ["redis-cli"],
+    "BackupCommand": ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"],
+    "PreBackupCommand": ["redis-cli", "SAVE"],
+    "ListDatabasesCommand": []
+  },
+  "influxdb": {
+    "FriendlyName": "InfluxDB",
+    "CliCommand": ["influx"],
+    "BackupCommand": ["influx", "backup", "{path}"],
+    "ListDatabasesCommand": ["influx", "bucket", "list", "--hide-headers"],
+    "OutputColumnIndex": 1
   }
 }
 ```
 
-Legacy `string` format is auto-migrated via `CommandArrayConverter` — old format with `>` redirect is cleaned up on load.
+Legacy `string` format is auto-migrated via `CommandArrayConverter` — old format with `>` redirect and `/bin/bash -c` wrappers are cleaned up on load.
 
 **Placeholders:**
 - `{path}` — backup file path (auto-generated). If present in the command, substituted directly (e.g. `mongodump --archive={path}`). If absent, stdout is piped to the file automatically.
@@ -180,6 +207,7 @@ Legacy `string` format is auto-migrated via `CommandArrayConverter` — old form
 | `IPermissionService` | `PermissionService` | Singleton |
 | `IAptPackageManager` | `AptPackageManager` | Transient |
 | `IBackupService` | `BackupService` | Transient |
+| `IBackupRetentionManager` | `BackupRetentionManager` | Singleton |
 | `IDatabaseScanner` | `SystemdScanner` | Transient |
 | `IServiceManager` | `SystemdServiceManager` | Transient |
 | `DatabaseAppService` | — | Transient |
@@ -201,19 +229,25 @@ Legacy `string` format is auto-migrated via `CommandArrayConverter` — old form
 
 ## Security
 
-- **No command injection** — all process execution uses `ProcessStartInfo.ArgumentList`. No shell string concatenation.
+- **No shell** — all process execution uses `ProcessStartInfo.ArgumentList`. Shell (`/bin/bash`) is never invoked.
 - **No shell redirect for backups** — stdout piped directly to a `FileStream` via `ExecuteAndStreamOutputAsync`.
-- **Timeout** — every process call has a configurable timeout (default 30s, backup 300s).
+- **Timeout** — every process call has a configurable timeout (default 30s, backup 300s, configurable per database).
 - **Exit code verification** — success determined by `ExitCode == 0`, not by string pattern matching.
-- **Shell minimized** — only used for operators (`&&`, `|`) that cannot be expressed via `ArgumentList`.
+- **No `ValidateConfig`** — shell operator scanning removed; no false alarms for SQL semicolons.
 
 ---
 
 ## Error Handling
 
-- `DatabaseConfigurationException` thrown when `databases.json` is corrupted (no silent catch).
+- `DatabaseConfigurationException` thrown when `databases.json` is corrupted — user can restore defaults or exit.
 - `ProcessResult.ExitCode` is the sole arbiter of success/failure.
 - All async methods accept `CancellationToken`.
+
+---
+
+## Change log
+
+All changes are documented in [`zmiany.md`](zmiany.md) (Polish).
 
 ---
 
@@ -224,13 +258,19 @@ Legacy `string` format is auto-migrated via `CommandArrayConverter` — old form
 
 ## Tests
 
-The `DbAutomatization.Tests` xUnit project contains 19 unit tests covering all layers:
+The `DbAutomatization.Tests` xUnit project contains **49 tests** (48 unit + 1 integration) covering all layers:
 
 | Test file | Tests | What it covers |
 |---|---|---|
-| `CommandArrayConverterTests.cs` | 6 | Old/new JSON format, empty/null, shell wrapping |
-| `BackupServiceTests.cs` | 6 | `{path}`/`{db}` substitution, streaming, shell mode, missing service |
+| `CommandArrayConverterTests.cs` | 6 | Old/new JSON format, empty/null, pipe-not-wrapped |
+| `BackupServiceTests.cs` | 10 | `{path}`/`{db}`, `PreBackupCommand`, streaming, timeout, retention, failure paths |
 | `DatabaseConfigRepositoryTests.cs` | 3 | Corrupted JSON, default creation, legacy redirect migration |
 | `PermissionServiceTests.cs` | 4 | Sudo true/false, exception handling, caching |
+| `SystemdServiceManagerTests.cs` | 9 | Start/stop/restart, `OutputColumnIndex`, CLI, error handling |
+| `SystemdScannerTests.cs` | 3 | Database detection, missing unit, empty config |
+| `AptPackageManagerTests.cs` | 4 | Package check, install sequence, error handling |
+| `ProcessExecutorTests.cs` | 6 | Stdout/stderr, exit code, timeout, streaming, missing executable |
+| `BackupRetentionManagerTests.cs` | 3 | Retention zero, cleanup, missing directory |
+| `IntegrationTests.cs` | 1 | Full backup cycle with real `ProcessExecutor`, `touch`, retention check |
 
 Run: `dotnet test`

@@ -62,13 +62,13 @@ public class CommandArrayConverterTests
     }
 
     [Fact]
-    public void ShellCommand_WrapsInBashDashC()
+    public void PipeInCommand_IsNotWrappedInShell()
     {
         string json = """{ "FriendlyName": "Test", "CliCommand": "influx bucket list --hide-headers | awk '{print $2}'" }""";
 
         var config = JsonSerializer.Deserialize<DatabaseConfig>(json);
 
         config.Should().NotBeNull();
-        config!.CliCommand.Should().BeEquivalentTo(["/bin/bash", "-c", "influx bucket list --hide-headers | awk '{print $2}'"]);
+        config!.CliCommand.Should().BeEquivalentTo(["influx", "bucket", "list", "--hide-headers", "|", "awk", "'{print", "$2}'"]);
     }
 }

@@ -6,11 +6,16 @@ public class BackupService : IBackupService
 {
     private readonly IDatabaseConfigRepository _configRepo;
     private readonly IProcessExecutor _process;
+    private readonly IBackupRetentionManager _retention;
 
-    public BackupService(IDatabaseConfigRepository configRepo, IProcessExecutor process)
+    public BackupService(
+        IDatabaseConfigRepository configRepo,
+        IProcessExecutor process,
+        IBackupRetentionManager retention)
     {
         _configRepo = configRepo;
         _process = process;
+        _retention = retention;
     }
 
     public async Task<BackupResult> CreateBackupAsync(
@@ -27,10 +32,34 @@ public class BackupService : IBackupService
                 -1);
         }
 
-        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm");
+        string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff");
         string dbNamePart = !string.IsNullOrEmpty(databaseName) ? $"_{databaseName}" : "";
         string fileName = $"backup_{serviceName}{dbNamePart}_{timestamp}.bak";
         string fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+        int timeout = config.BackupTimeoutSeconds;
+
+        if (config.PreBackupCommand is { Length: > 0 })
+        {
+            string[] preArgs = config.PreBackupCommand
+                .Select(arg => arg.Replace("{path}", fullPath))
+                .ToArray();
+
+            if (!string.IsNullOrEmpty(databaseName))
+                preArgs = preArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
+
+            var preResult = await _process.ExecuteAsync(
+                preArgs[0], preArgs[1..],
+                timeoutSeconds: timeout,
+                cancellationToken: cancellationToken);
+
+            if (!preResult.Success)
+            {
+                return new BackupResult(
+                    string.Empty,
+                    $"Pre-backup command failed: {preResult.Error}",
+                    preResult.ExitCode);
+            }
+        }
 
         string[] finalArgs = config.BackupCommand
             .Select(arg => arg.Replace("{path}", fullPath))
@@ -40,21 +69,13 @@ public class BackupService : IBackupService
             finalArgs = finalArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
 
         bool hasPathInTemplate = config.BackupCommand.Any(arg => arg.Contains("{path}"));
-        bool needsShell = finalArgs.Any(arg => arg.Contains("&&") || arg.Contains('|') || arg.Contains(';'));
 
         ProcessResult result;
-        if (needsShell)
+        if (hasPathInTemplate)
         {
             result = await _process.ExecuteAsync(
                 finalArgs[0], finalArgs[1..],
-                timeoutSeconds: 300,
-                cancellationToken: cancellationToken);
-        }
-        else if (hasPathInTemplate)
-        {
-            result = await _process.ExecuteAsync(
-                finalArgs[0], finalArgs[1..],
-                timeoutSeconds: 300,
+                timeoutSeconds: timeout,
                 cancellationToken: cancellationToken);
         }
         else
@@ -62,8 +83,17 @@ public class BackupService : IBackupService
             using var fileStream = File.Create(fullPath);
             result = await _process.ExecuteAndStreamOutputAsync(
                 finalArgs[0], finalArgs[1..], fileStream,
-                timeoutSeconds: 300,
+                timeoutSeconds: timeout,
                 cancellationToken: cancellationToken);
+        }
+
+        if (result.Success && config.RetentionCount > 0)
+        {
+            string filePrefix = $"backup_{serviceName}";
+            await _retention.CleanupAsync(
+                AppDomain.CurrentDomain.BaseDirectory,
+                filePrefix,
+                config.RetentionCount);
         }
 
         return new BackupResult(fullPath, result.Error, result.ExitCode);

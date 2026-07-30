@@ -93,10 +93,29 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 config.BackupCommand = migrated;
                 changed = true;
             }
+
+            if (MigrateRedisShellCommand(config))
+                changed = true;
         }
 
         if (changed)
             Save();
+    }
+
+    private static bool MigrateRedisShellCommand(DatabaseConfig config)
+    {
+        if (config.BackupCommand is not ["/bin/bash", "-c", var shellCommand])
+            return false;
+
+        if (!shellCommand.Contains("redis-cli SAVE") || !shellCommand.Contains("&&"))
+            return false;
+
+        string cpPart = shellCommand[(shellCommand.IndexOf("&&") + 2)..].Trim();
+
+        config.PreBackupCommand = ["redis-cli", "SAVE"];
+        config.BackupCommand = cpPart.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        return true;
     }
 
     private static string[]? RemoveShellRedirect(string[] args)
@@ -164,8 +183,20 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 {
                     FriendlyName = "Redis",
                     CliCommand = ["redis-cli"],
-                    BackupCommand = ["/bin/bash", "-c", "redis-cli SAVE && sudo cp /var/lib/redis/dump.rdb {path}"],
+                    PreBackupCommand = ["redis-cli", "SAVE"],
+                    BackupCommand = ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"],
                     ListDatabasesCommand = []
+                }
+            },
+            {
+                "influxdb",
+                new DatabaseConfig
+                {
+                    FriendlyName = "InfluxDB",
+                    CliCommand = ["influx"],
+                    BackupCommand = ["influx", "backup", "{path}"],
+                    ListDatabasesCommand = ["influx", "bucket", "list", "--hide-headers"],
+                    OutputColumnIndex = 1
                 }
             }
         };
