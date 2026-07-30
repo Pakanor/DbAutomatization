@@ -18,6 +18,7 @@ class Program
                 .AddSingleton<IBackupRetentionManager, BackupRetentionManager>()
                 .AddTransient<IAptPackageManager, AptPackageManager>()
                 .AddTransient<IBackupService, BackupService>()
+                .AddTransient<IRestoreService, RestoreService>()
                 .AddTransient<IDatabaseScanner, SystemdScanner>()
                 .AddTransient<IServiceManager, SystemdServiceManager>()
                 .AddTransient<DatabaseAppService>()

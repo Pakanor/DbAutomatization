@@ -10,6 +10,7 @@ public class DatabaseAppService
     private readonly IDatabaseConfigRepository _configRepo;
     private readonly IAptPackageManager _apt;
     private readonly IBackupService _backup;
+    private readonly IRestoreService _restore;
     private readonly IPermissionService _permission;
 
     public bool HasSudo => _permission.HasSudo;
@@ -20,6 +21,7 @@ public class DatabaseAppService
         IDatabaseConfigRepository configRepo,
         IAptPackageManager apt,
         IBackupService backup,
+        IRestoreService restore,
         IPermissionService permission)
     {
         _scanner = scanner;
@@ -27,6 +29,7 @@ public class DatabaseAppService
         _configRepo = configRepo;
         _apt = apt;
         _backup = backup;
+        _restore = restore;
         _permission = permission;
     }
 
@@ -113,6 +116,7 @@ public class DatabaseAppService
 
             Console.WriteLine("[4] Wejdź do konsoli CLI");
             Console.WriteLine("[5] Backup");
+            Console.WriteLine("[6] Odtwórz z pliku (Restore)");
             Console.WriteLine("[0] Powrót do menu głównego");
             Console.Write("\nWybór działania: ");
 
@@ -165,37 +169,94 @@ public class DatabaseAppService
                 {
                     Console.WriteLine($"\n[Backup] Przygotowywanie kopii zapasowej dla {selectedDb.Name}...\n");
 
-                    string selectedDatabaseName = string.Empty;
+                    var config = _configRepo.Get(selectedDb.ServiceName);
+                    bool hasSingleDbCommand = config?.SingleDatabaseBackupCommand is { Length: > 0 };
+                    bool hasListCommand = config?.ListDatabasesCommand is { Length: > 0 };
+                    string? selectedDatabaseName = null;
 
-                    var internalDatabases = await _manager.GetDatabasesAsync(selectedDb.ServiceName);
-
-                    if (internalDatabases.Any())
+                    if (hasSingleDbCommand && hasListCommand)
                     {
-                        Console.WriteLine($"--- Wybierz bazę danych z silnika {selectedDb.Name} ---");
-                        for (int d = 0; d < internalDatabases.Count; d++)
-                            Console.WriteLine($"[{d + 1}] {internalDatabases[d]}");
-
-                        Console.WriteLine("[0] Anuluj backup");
+                        Console.WriteLine("--- Wybierz tryb backupu ---");
+                        Console.WriteLine("[1] Cały silnik (Full Backup)");
+                        Console.WriteLine("[2] Konkretna baza danych");
+                        Console.WriteLine("[0] Anuluj");
                         Console.Write("\nWybór: ");
 
-                        if (int.TryParse(Console.ReadLine(), out int internalIndex) && internalIndex > 0 && internalIndex <= internalDatabases.Count)
-                            selectedDatabaseName = internalDatabases[internalIndex - 1];
-                        else
+                        var modeChoice = Console.ReadLine()?.Trim();
+                        if (modeChoice == "0" || modeChoice != "2")
                         {
-                            Console.WriteLine("Anulowano lub wybrano niepoprawną opcję.");
-                            break;
+                            if (modeChoice == "0")
+                            {
+                                Console.WriteLine("Anulowano.");
+                                break;
+                            }
+                        }
+
+                        if (modeChoice == "2")
+                        {
+                            var internalDatabases = await _manager.GetDatabasesAsync(selectedDb.ServiceName);
+
+                            if (internalDatabases.Any())
+                            {
+                                Console.WriteLine($"\n--- Wybierz bazę danych z silnika {selectedDb.Name} ---");
+                                for (int d = 0; d < internalDatabases.Count; d++)
+                                    Console.WriteLine($"[{d + 1}] {internalDatabases[d]}");
+
+                                Console.WriteLine("[0] Anuluj backup");
+                                Console.Write("\nWybór: ");
+
+                                if (int.TryParse(Console.ReadLine(), out int internalIndex) && internalIndex > 0 && internalIndex <= internalDatabases.Count)
+                                    selectedDatabaseName = internalDatabases[internalIndex - 1];
+                                else
+                                {
+                                    Console.WriteLine("Anulowano lub wybrano niepoprawną opcję.");
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("[!] Nie można pobrać listy baz dla tego silnika. Wykonuję backup całego silnika.");
+                            }
+                        }
+                    }
+                    else if (hasListCommand)
+                    {
+                        var internalDatabases = await _manager.GetDatabasesAsync(selectedDb.ServiceName);
+
+                        if (internalDatabases.Any())
+                        {
+                            Console.WriteLine($"--- Wybierz bazę danych z silnika {selectedDb.Name} ---");
+                            for (int d = 0; d < internalDatabases.Count; d++)
+                                Console.WriteLine($"[{d + 1}] {internalDatabases[d]}");
+
+                            Console.WriteLine("[0] Anuluj backup");
+                            Console.Write("\nWybór: ");
+
+                            if (int.TryParse(Console.ReadLine(), out int internalIndex) && internalIndex > 0 && internalIndex <= internalDatabases.Count)
+                                selectedDatabaseName = internalDatabases[internalIndex - 1];
+                            else
+                            {
+                                Console.WriteLine("Anulowano lub wybrano niepoprawną opcję.");
+                                break;
+                            }
                         }
                     }
 
                     var backupResult = await _backup.CreateBackupAsync(
                         selectedDb.ServiceName,
-                        string.IsNullOrEmpty(selectedDatabaseName) ? null : selectedDatabaseName);
+                        selectedDatabaseName);
 
                     if (backupResult.Success)
                         Console.WriteLine($"[V] Backup wykonany pomyślnie!\nPlik zapisano w: {backupResult.FilePath}");
                     else
                         Console.WriteLine($"[X] Błąd backupu:\n{backupResult.Message}");
 
+                    break;
+                }
+
+                case "6":
+                {
+                    await HandleRestoreAsync(selectedDb.ServiceName, selectedDb.Name);
                     break;
                 }
 
@@ -316,6 +377,111 @@ public class DatabaseAppService
         {
             _configRepo.Unregister(serviceName);
             Console.WriteLine("Usunięto z listy monitorowanych.");
+        }
+    }
+
+    public async Task HandleRestoreAsync(string serviceName, string friendlyName)
+    {
+        var config = _configRepo.Get(serviceName);
+        bool hasRestoreCommand = config?.RestoreCommand is { Length: > 0 };
+
+        if (!hasRestoreCommand)
+        {
+            Console.WriteLine($"\n[!] Brak zdefiniowanej komendy restore dla '{friendlyName}'.");
+            return;
+        }
+
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var backupFiles = Directory.GetFiles(baseDir, $"backup_{serviceName}*")
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.LastWriteTime)
+            .ToList();
+
+        if (backupFiles.Count == 0)
+        {
+            Console.WriteLine($"\n[!] Brak plików backupu dla '{friendlyName}' w katalogu:\n  {baseDir}");
+            return;
+        }
+
+        Console.WriteLine($"\n--- Dostępne backupy dla {friendlyName} ---");
+        for (int i = 0; i < backupFiles.Count; i++)
+        {
+            var f = backupFiles[i];
+            Console.WriteLine($"[{i + 1}] {f.Name} ({f.LastWriteTime:yyyy-MM-dd HH:mm:ss})");
+        }
+        Console.WriteLine("[0] Anuluj");
+        Console.Write("\nWybór pliku: ");
+
+        if (!int.TryParse(Console.ReadLine(), out int fileIndex) || fileIndex <= 0 || fileIndex > backupFiles.Count)
+        {
+            Console.WriteLine("Anulowano.");
+            return;
+        }
+
+        string selectedPath = backupFiles[fileIndex - 1].FullName;
+
+        string? targetDatabase = null;
+        bool hasSingleDbRestore = config?.SingleDatabaseRestoreCommand is { Length: > 0 };
+        bool hasListCommand = config?.ListDatabasesCommand is { Length: > 0 };
+
+        if (hasSingleDbRestore && hasListCommand)
+        {
+            Console.WriteLine("\n--- Wybierz docelową bazę danych ---");
+            Console.WriteLine("[1] Przywróć do całego silnika");
+            Console.WriteLine("[2] Przywróć do konkretnej bazy");
+            Console.WriteLine("[0] Anuluj");
+            Console.Write("\nWybór: ");
+
+            var modeChoice = Console.ReadLine()?.Trim();
+            if (modeChoice == "0")
+            {
+                Console.WriteLine("Anulowano.");
+                return;
+            }
+
+            if (modeChoice == "2")
+            {
+                var databases = await _manager.GetDatabasesAsync(serviceName);
+                if (databases.Any())
+                {
+                    Console.WriteLine($"\n--- Wybierz docelową bazę danych ---");
+                    for (int d = 0; d < databases.Count; d++)
+                        Console.WriteLine($"[{d + 1}] {databases[d]}");
+
+                    Console.Write("\nWybór: ");
+
+                    if (int.TryParse(Console.ReadLine(), out int dbIdx) && dbIdx > 0 && dbIdx <= databases.Count)
+                        targetDatabase = databases[dbIdx - 1];
+                    else
+                    {
+                        Console.WriteLine("Niepoprawny wybór. Przywracam do całego silnika.");
+                    }
+                }
+            }
+        }
+
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("\n[!] UWAGA: Odtwarzanie danych nadpisze istniejące tabele/bazy!");
+        Console.ResetColor();
+        Console.Write("Czy na pewno chcesz kontynuować? (y/N): ");
+
+        var confirm = Console.ReadLine()?.ToLower().Trim();
+        if (confirm != "y" && confirm != "yes")
+        {
+            Console.WriteLine("Anulowano.");
+            return;
+        }
+
+        Console.WriteLine($"\nPrzywracanie backupu dla {friendlyName}...");
+        var result = await _restore.RestoreAsync(serviceName, selectedPath, targetDatabase);
+
+        if (result.Success)
+            Console.WriteLine("[V] Przywracanie zakończone pomyślnie.");
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[X] Błąd przywracania:\n{result.Error}");
+            Console.ResetColor();
         }
     }
 }
