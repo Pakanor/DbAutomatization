@@ -154,6 +154,9 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                     FriendlyName = "PostgreSQL",
                     CliCommand = ["sudo", "-u", "postgres", "psql"],
                     BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
+                    SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "-d", "{db}"],
+                    RestoreCommand = ["sudo", "-u", "postgres", "psql", "-f", "{path}"],
+                    SingleDatabaseRestoreCommand = ["sudo", "-u", "postgres", "psql", "-d", "{db}", "-f", "{path}"],
                     ListDatabasesCommand = ["sudo", "-u", "postgres", "psql", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;"]
                 }
             },
@@ -164,6 +167,9 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                     FriendlyName = "MariaDB",
                     CliCommand = ["mariadb"],
                     BackupCommand = ["sudo", "mariadb-dump", "--all-databases"],
+                    SingleDatabaseBackupCommand = ["sudo", "mariadb-dump", "{db}"],
+                    RestoreCommand = ["sudo", "mariadb", "-e", "source {path}"],
+                    SingleDatabaseRestoreCommand = ["sudo", "mariadb", "{db}", "-e", "source {path}"],
                     ListDatabasesCommand = ["sudo", "mysql", "-e", "SHOW DATABASES;", "-s", "--N"]
                 }
             },
@@ -174,6 +180,7 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                     FriendlyName = "MongoDB",
                     CliCommand = ["mongosh"],
                     BackupCommand = ["mongodump", "--archive={path}"],
+                    RestoreCommand = ["mongorestore", "--archive={path}"],
                     ListDatabasesCommand = []
                 }
             },
@@ -185,6 +192,7 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                     CliCommand = ["redis-cli"],
                     PreBackupCommand = ["redis-cli", "SAVE"],
                     BackupCommand = ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"],
+                    RestoreCommand = ["sudo", "cp", "{path}", "/var/lib/redis/dump.rdb"],
                     ListDatabasesCommand = []
                 }
             },
@@ -195,6 +203,7 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                     FriendlyName = "InfluxDB",
                     CliCommand = ["influx"],
                     BackupCommand = ["influx", "backup", "{path}"],
+                    RestoreCommand = ["influx", "restore", "{path}"],
                     ListDatabasesCommand = ["influx", "bucket", "list", "--hide-headers"],
                     OutputColumnIndex = 1
                 }

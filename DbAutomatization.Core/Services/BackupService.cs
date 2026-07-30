@@ -24,7 +24,16 @@ public class BackupService : IBackupService
         CancellationToken cancellationToken = default)
     {
         var config = _configRepo.Get(serviceName);
-        if (config == null || config.BackupCommand == null || config.BackupCommand.Length == 0)
+        if (config == null)
+        {
+            return new BackupResult(
+                string.Empty,
+                $"Brak zdefiniowanej komendy backupu dla '{serviceName}'.",
+                -1);
+        }
+
+        string[] baseCommand = SelectBackupCommand(config, databaseName);
+        if (baseCommand.Length == 0)
         {
             return new BackupResult(
                 string.Empty,
@@ -61,14 +70,14 @@ public class BackupService : IBackupService
             }
         }
 
-        string[] finalArgs = config.BackupCommand
+        string[] finalArgs = baseCommand
             .Select(arg => arg.Replace("{path}", fullPath))
             .ToArray();
 
         if (!string.IsNullOrEmpty(databaseName))
             finalArgs = finalArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
 
-        bool hasPathInTemplate = config.BackupCommand.Any(arg => arg.Contains("{path}"));
+        bool hasPathInTemplate = baseCommand.Any(arg => arg.Contains("{path}"));
 
         ProcessResult result;
         if (hasPathInTemplate)
@@ -97,5 +106,13 @@ public class BackupService : IBackupService
         }
 
         return new BackupResult(fullPath, result.Error, result.ExitCode);
+    }
+
+    private static string[] SelectBackupCommand(DatabaseConfig config, string? databaseName)
+    {
+        if (!string.IsNullOrEmpty(databaseName) && config.SingleDatabaseBackupCommand is { Length: > 0 })
+            return config.SingleDatabaseBackupCommand;
+
+        return config.BackupCommand ?? [];
     }
 }

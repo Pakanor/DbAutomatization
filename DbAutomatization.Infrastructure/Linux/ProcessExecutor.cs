@@ -96,4 +96,49 @@ public class ProcessExecutor : IProcessExecutor
 
         return new ProcessResult(string.Empty, error, process.ExitCode);
     }
+
+    public async Task<ProcessResult> ExecuteWithStdinFileAsync(
+        string fileName,
+        string[] arguments,
+        string stdinFilePath,
+        int timeoutSeconds = 300,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var arg in arguments)
+            startInfo.ArgumentList.Add(arg);
+
+        using var process = new Process { StartInfo = startInfo };
+        process.Start();
+
+        var stdinTask = Task.Run(async () =>
+        {
+            await using var fileStream = File.OpenRead(stdinFilePath);
+            await fileStream.CopyToAsync(process.StandardInput.BaseStream, timeoutCts.Token);
+            process.StandardInput.Close();
+        }, timeoutCts.Token);
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync(timeoutCts.Token);
+        await stdinTask;
+
+        string output = await stdoutTask;
+        string error = await stderrTask;
+
+        return new ProcessResult(output, error, process.ExitCode);
+    }
 }

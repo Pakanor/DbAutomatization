@@ -271,6 +271,70 @@ public class BackupServiceTests
     }
 
     [Fact]
+    public async Task SingleDatabaseBackupCommand_UsedWhenDatabaseNameProvided()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
+            SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "-d", "{db}"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "sudo",
+                It.Is<string[]>(args => args.Contains("pg_dump")),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("postgresql", "mydb");
+
+        result.Success.Should().BeTrue();
+        _processMock.Verify(p => p.ExecuteAndStreamOutputAsync(
+            "sudo",
+            It.Is<string[]>(args => args.Contains("pg_dump") && args.Contains("mydb")),
+            It.IsAny<Stream>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SingleDatabaseBackupCommand_NotUsedWhenDatabaseNameNull()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
+            SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "-d", "{db}"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "sudo",
+                It.Is<string[]>(args => args.Contains("pg_dumpall")),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("postgresql");
+
+        result.Success.Should().BeTrue();
+        _processMock.Verify(p => p.ExecuteAndStreamOutputAsync(
+            "sudo",
+            It.Is<string[]>(args => args.Contains("pg_dumpall")),
+            It.IsAny<Stream>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task StreamIsDisposedAfterBackup()
     {
         var config = new DatabaseConfig

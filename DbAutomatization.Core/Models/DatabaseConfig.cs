@@ -19,6 +19,15 @@ public class DatabaseConfig
     [JsonConverter(typeof(CommandArrayConverter))]
     public string[] ListDatabasesCommand { get; set; } = [];
 
+    [JsonConverter(typeof(CommandArrayConverter))]
+    public string[] SingleDatabaseBackupCommand { get; set; } = [];
+
+    [JsonConverter(typeof(CommandArrayConverter))]
+    public string[] RestoreCommand { get; set; } = [];
+
+    [JsonConverter(typeof(CommandArrayConverter))]
+    public string[] SingleDatabaseRestoreCommand { get; set; } = [];
+
     public int BackupTimeoutSeconds { get; set; } = 300;
 
     public int RetentionCount { get; set; } = 0;

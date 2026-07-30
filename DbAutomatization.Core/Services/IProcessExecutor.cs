@@ -22,4 +22,11 @@ public interface IProcessExecutor
         Stream outputStream,
         int timeoutSeconds = 300,
         CancellationToken cancellationToken = default);
+
+    Task<ProcessResult> ExecuteWithStdinFileAsync(
+        string fileName,
+        string[] arguments,
+        string stdinFilePath,
+        int timeoutSeconds = 300,
+        CancellationToken cancellationToken = default);
 }
