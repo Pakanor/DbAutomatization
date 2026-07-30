@@ -32,3 +32,6 @@ obj/
 *.nuget.targets
 openspec
 .opencode
+
+## Backups
+backups/

@@ -1,3 +1,4 @@
+using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
 
 namespace DbAutomatization.Infrastructure.Linux;
@@ -20,6 +21,16 @@ public class AptPackageManager : IAptPackageManager
             timeoutSeconds: 10, cancellationToken: cancellationToken);
 
         return result.Success;
+    }
+
+    public async Task<bool> DoesPackageExistAsync(
+        DatabaseConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        string packageName = !string.IsNullOrEmpty(config.AptPackageName)
+            ? config.AptPackageName
+            : config.FriendlyName;
+        return await DoesPackageExistAsync(packageName, cancellationToken);
     }
 
     public async Task<(bool Success, string ErrorMessage)> InstallPackageAsync(
@@ -53,5 +64,15 @@ public class AptPackageManager : IAptPackageManager
             timeoutSeconds: 30, cancellationToken: cancellationToken);
 
         return (true, string.Empty);
+    }
+
+    public async Task<(bool Success, string ErrorMessage)> InstallPackageAsync(
+        DatabaseConfig config,
+        CancellationToken cancellationToken = default)
+    {
+        string packageName = !string.IsNullOrEmpty(config.AptPackageName)
+            ? config.AptPackageName
+            : config.FriendlyName;
+        return await InstallPackageAsync(packageName, packageName.ToLowerInvariant(), cancellationToken);
     }
 }

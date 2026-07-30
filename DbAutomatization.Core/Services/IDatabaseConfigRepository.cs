@@ -8,4 +8,5 @@ public interface IDatabaseConfigRepository
     DatabaseConfig? Get(string serviceName);
     void Register(string serviceName, DatabaseConfig config);
     void Unregister(string serviceName);
+    void Reload();
 }

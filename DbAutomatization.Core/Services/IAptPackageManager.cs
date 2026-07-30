@@ -1,3 +1,5 @@
+using DbAutomatization.Core.Models;
+
 namespace DbAutomatization.Core.Services;
 
 public interface IAptPackageManager
@@ -7,7 +9,15 @@ public interface IAptPackageManager
         string serviceName,
         CancellationToken cancellationToken = default);
 
+    Task<(bool Success, string ErrorMessage)> InstallPackageAsync(
+        DatabaseConfig config,
+        CancellationToken cancellationToken = default);
+
     Task<bool> DoesPackageExistAsync(
         string packageName,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> DoesPackageExistAsync(
+        DatabaseConfig config,
         CancellationToken cancellationToken = default);
 }

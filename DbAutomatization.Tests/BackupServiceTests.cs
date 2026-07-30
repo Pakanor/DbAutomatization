@@ -277,7 +277,7 @@ public class BackupServiceTests
         {
             FriendlyName = "PostgreSQL",
             BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
-            SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "-d", "{db}"]
+            SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "--clean", "--if-exists", "-d", "{db}"]
         };
 
         _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
@@ -309,7 +309,7 @@ public class BackupServiceTests
         {
             FriendlyName = "PostgreSQL",
             BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
-            SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "-d", "{db}"]
+            SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "--clean", "--if-exists", "-d", "{db}"]
         };
 
         _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);

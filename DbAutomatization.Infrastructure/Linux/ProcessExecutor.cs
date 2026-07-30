@@ -28,7 +28,14 @@ public class ProcessExecutor : IProcessExecutor
             startInfo.ArgumentList.Add(arg);
 
         using var process = new Process { StartInfo = startInfo };
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new ProcessResult(string.Empty, ex.Message, -1);
+        }
 
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
@@ -84,7 +91,14 @@ public class ProcessExecutor : IProcessExecutor
             startInfo.ArgumentList.Add(arg);
 
         using var process = new Process { StartInfo = startInfo };
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new ProcessResult(string.Empty, ex.Message, -1);
+        }
 
         var stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(outputStream, timeoutCts.Token);
         var errorTask = process.StandardError.ReadToEndAsync();
@@ -121,7 +135,14 @@ public class ProcessExecutor : IProcessExecutor
             startInfo.ArgumentList.Add(arg);
 
         using var process = new Process { StartInfo = startInfo };
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new ProcessResult(string.Empty, ex.Message, -1);
+        }
 
         var stdinTask = Task.Run(async () =>
         {

@@ -146,6 +146,118 @@ public class AptPackageManagerTests
     }
 
     [Fact]
+    public async Task InstallPackageAsync_WithConfig_UsesAptPackageName()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "Redis",
+            AptPackageName = "redis-server",
+            CliCommand = ["redis-cli"]
+        };
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "sudo",
+                It.Is<string[]>(args => args[0] == "apt" && args[1] == "update"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "sudo",
+                It.Is<string[]>(args =>
+                    args[0] == "apt" &&
+                    args[1] == "install" &&
+                    args[2] == "-y" &&
+                    args[3] == "redis-server"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "sudo",
+                It.Is<string[]>(args =>
+                    args[0] == "systemctl" &&
+                    args[1] == "daemon-reload"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "sudo",
+                It.Is<string[]>(args =>
+                    args[0] == "systemctl" &&
+                    args[1] == "enable" &&
+                    args[2] == "redis-server"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "sudo",
+                It.Is<string[]>(args =>
+                    args[0] == "systemctl" &&
+                    args[1] == "start" &&
+                    args[2] == "redis-server"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var (success, errorMessage) = await _apt.InstallPackageAsync(config);
+
+        success.Should().BeTrue();
+        errorMessage.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DoesPackageExistAsync_WithConfig_UsesAptPackageName()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "Redis",
+            AptPackageName = "redis-server"
+        };
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "which",
+                It.Is<string[]>(args => args[0] == "redis-server"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("/usr/bin/redis-server", "", 0));
+
+        var exists = await _apt.DoesPackageExistAsync(config);
+
+        exists.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DoesPackageExistAsync_WithConfig_FallsBackToFriendlyName()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "customdb",
+            AptPackageName = ""
+        };
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "which",
+                It.Is<string[]>(args => args[0] == "customdb"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("/usr/bin/customdb", "", 0));
+
+        var exists = await _apt.DoesPackageExistAsync(config);
+
+        exists.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task InstallPackageAsync_InstallFails_ReturnsError()
     {
         _processMock

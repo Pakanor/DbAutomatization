@@ -79,15 +79,21 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
             Save();
     }
 
+    public void Reload()
+    {
+        Load();
+    }
+
     private void MigrateLegacyTemplates()
     {
         bool changed = false;
+        var defaults = GetDefaults();
 
         foreach (var key in _cache.Keys)
         {
             var config = _cache[key];
-            var migrated = RemoveShellRedirect(config.BackupCommand);
 
+            var migrated = RemoveShellRedirect(config.BackupCommand);
             if (migrated != null)
             {
                 config.BackupCommand = migrated;
@@ -96,10 +102,114 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
 
             if (MigrateRedisShellCommand(config))
                 changed = true;
+
+            if (MigrateListDatabasesCommand(config, key))
+                changed = true;
+
+            if (defaults.TryGetValue(key, out var defaultConfig))
+            {
+                changed |= MergeMissingFields(config, defaultConfig);
+            }
         }
 
         if (changed)
             Save();
+    }
+
+    private static bool MigrateListDatabasesCommand(DatabaseConfig config, string key)
+    {
+        bool changed = false;
+        var defaults = GetDefaults();
+
+        if (key is "postgresql" or "mariadb")
+        {
+            if (defaults.TryGetValue(key, out var defaultCfg) && defaultCfg.ListDatabasesCommand is { Length: > 0 })
+            {
+                if (config.ListDatabasesCommand is { Length: > 0 })
+                {
+                    bool isOldFormat = config.ListDatabasesCommand.Any(a => a is "-c" or "-e" && a.Length > 2);
+                    if (isOldFormat || config.ListDatabasesCommand.Length != defaultCfg.ListDatabasesCommand.Length)
+                    {
+                        config.ListDatabasesCommand = defaultCfg.ListDatabasesCommand;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if (key is "postgresql" or "mariadb")
+        {
+            if (defaults.TryGetValue(key, out var defaultCfg))
+            {
+                bool hasFileFlag = config.RestoreCommand is { Length: > 0 } &&
+                    (config.RestoreCommand.Contains("-f") || config.RestoreCommand.Contains("source"));
+                bool hasSingleFileFlag = config.SingleDatabaseRestoreCommand is { Length: > 0 } &&
+                    (config.SingleDatabaseRestoreCommand.Contains("-f") || config.SingleDatabaseRestoreCommand.Contains("source"));
+
+                if (hasFileFlag)
+                    config.RestoreCommand = defaultCfg.RestoreCommand;
+                if (hasSingleFileFlag)
+                    config.SingleDatabaseRestoreCommand = defaultCfg.SingleDatabaseRestoreCommand;
+                changed |= hasFileFlag | hasSingleFileFlag;
+            }
+        }
+
+        if (key == "mariadb" && config.ListDatabasesCommand is { Length: > 0 } &&
+            config.ListDatabasesCommand.Contains("mysqlshow"))
+        {
+            config.ListDatabasesCommand = ["sudo", "mariadb", "-BN", "-e", "SHOW DATABASES;"];
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool MergeMissingFields(DatabaseConfig target, DatabaseConfig source)
+    {
+        bool changed = false;
+
+        if (string.IsNullOrEmpty(target.AptPackageName) && !string.IsNullOrEmpty(source.AptPackageName))
+        {
+            target.AptPackageName = source.AptPackageName;
+            changed = true;
+        }
+        if (target.CliCommand is not { Length: > 0 } && source.CliCommand is { Length: > 0 })
+        {
+            target.CliCommand = source.CliCommand;
+            changed = true;
+        }
+        if (target.BackupCommand is not { Length: > 0 } && source.BackupCommand is { Length: > 0 })
+        {
+            target.BackupCommand = source.BackupCommand;
+            changed = true;
+        }
+        if (target.SingleDatabaseBackupCommand is not { Length: > 0 } && source.SingleDatabaseBackupCommand is { Length: > 0 })
+        {
+            target.SingleDatabaseBackupCommand = source.SingleDatabaseBackupCommand;
+            changed = true;
+        }
+        if (target.RestoreCommand is not { Length: > 0 } && source.RestoreCommand is { Length: > 0 })
+        {
+            target.RestoreCommand = source.RestoreCommand;
+            changed = true;
+        }
+        if (target.SingleDatabaseRestoreCommand is not { Length: > 0 } && source.SingleDatabaseRestoreCommand is { Length: > 0 })
+        {
+            target.SingleDatabaseRestoreCommand = source.SingleDatabaseRestoreCommand;
+            changed = true;
+        }
+        if (target.ListDatabasesCommand is not { Length: > 0 } && source.ListDatabasesCommand is { Length: > 0 })
+        {
+            target.ListDatabasesCommand = source.ListDatabasesCommand;
+            changed = true;
+        }
+        if (target.PreBackupCommand is not { Length: > 0 } && source.PreBackupCommand is { Length: > 0 })
+        {
+            target.PreBackupCommand = source.PreBackupCommand;
+            changed = true;
+        }
+
+        return changed;
     }
 
     private static bool MigrateRedisShellCommand(DatabaseConfig config)
@@ -152,12 +262,13 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "PostgreSQL",
+                    AptPackageName = "postgresql",
                     CliCommand = ["sudo", "-u", "postgres", "psql"],
                     BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"],
-                    SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "-d", "{db}"],
-                    RestoreCommand = ["sudo", "-u", "postgres", "psql", "-f", "{path}"],
-                    SingleDatabaseRestoreCommand = ["sudo", "-u", "postgres", "psql", "-d", "{db}", "-f", "{path}"],
-                    ListDatabasesCommand = ["sudo", "-u", "postgres", "psql", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false;"]
+                    SingleDatabaseBackupCommand = ["sudo", "-u", "postgres", "pg_dump", "--clean", "--if-exists", "-d", "{db}"],
+                    RestoreCommand = ["sudo", "-u", "postgres", "psql", "--set", "ON_ERROR_STOP=on"],
+                    SingleDatabaseRestoreCommand = ["sudo", "-u", "postgres", "psql", "--set", "ON_ERROR_STOP=on", "-d", "{db}"],
+                    ListDatabasesCommand = ["sudo", "-u", "postgres", "psql", "-l", "-t", "-A"]
                 }
             },
             {
@@ -165,12 +276,13 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "MariaDB",
+                    AptPackageName = "mariadb-server",
                     CliCommand = ["mariadb"],
                     BackupCommand = ["sudo", "mariadb-dump", "--all-databases"],
                     SingleDatabaseBackupCommand = ["sudo", "mariadb-dump", "{db}"],
-                    RestoreCommand = ["sudo", "mariadb", "-e", "source {path}"],
-                    SingleDatabaseRestoreCommand = ["sudo", "mariadb", "{db}", "-e", "source {path}"],
-                    ListDatabasesCommand = ["sudo", "mysql", "-e", "SHOW DATABASES;", "-s", "--N"]
+                    RestoreCommand = ["sudo", "mariadb"],
+                    SingleDatabaseRestoreCommand = ["sudo", "mariadb", "{db}"],
+                    ListDatabasesCommand = ["sudo", "mariadb", "-BN", "-e", "SHOW DATABASES;"]
                 }
             },
             {
@@ -178,10 +290,13 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "MongoDB",
+                    AptPackageName = "mongodb-org",
                     CliCommand = ["mongosh"],
                     BackupCommand = ["mongodump", "--archive={path}"],
+                    SingleDatabaseBackupCommand = ["mongodump", "--db", "{db}", "--archive={path}"],
                     RestoreCommand = ["mongorestore", "--archive={path}"],
-                    ListDatabasesCommand = []
+                    SingleDatabaseRestoreCommand = ["mongorestore", "--nsInclude", "{db}.*", "--archive={path}"],
+                    ListDatabasesCommand = ["mongosh", "--quiet", "--eval", "db.adminCommand('listDatabases').databases.forEach(d => print(d.name))"]
                 }
             },
             {
@@ -189,10 +304,13 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "Redis",
+                    AptPackageName = "redis-server",
                     CliCommand = ["redis-cli"],
                     PreBackupCommand = ["redis-cli", "SAVE"],
                     BackupCommand = ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"],
+                    SingleDatabaseBackupCommand = ["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"],
                     RestoreCommand = ["sudo", "cp", "{path}", "/var/lib/redis/dump.rdb"],
+                    SingleDatabaseRestoreCommand = ["sudo", "cp", "{path}", "/var/lib/redis/dump.rdb"],
                     ListDatabasesCommand = []
                 }
             },
@@ -201,9 +319,12 @@ public class DatabaseConfigRepository : IDatabaseConfigRepository
                 new DatabaseConfig
                 {
                     FriendlyName = "InfluxDB",
+                    AptPackageName = "influxdb",
                     CliCommand = ["influx"],
                     BackupCommand = ["influx", "backup", "{path}"],
+                    SingleDatabaseBackupCommand = ["influx", "backup", "-database", "{db}", "{path}"],
                     RestoreCommand = ["influx", "restore", "{path}"],
+                    SingleDatabaseRestoreCommand = ["influx", "restore", "-database", "{db}", "{path}"],
                     ListDatabasesCommand = ["influx", "bucket", "list", "--hide-headers"],
                     OutputColumnIndex = 1
                 }

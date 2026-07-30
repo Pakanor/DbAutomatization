@@ -9,21 +9,36 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
+        if (!await CheckSudoAsync())
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("[X] DbAutomatization wymaga uprawnień root (passwordless sudo).");
+            Console.ResetColor();
+            Console.WriteLine("Uruchom: sudo dotnet run");
+            Console.WriteLine("Lub skonfiguruj passwordless sudo w /etc/sudoers");
+            return 1;
+        }
+
         try
         {
             var serviceProvider = new ServiceCollection()
                 .AddSingleton<IProcessExecutor, ProcessExecutor>()
                 .AddSingleton<IDatabaseConfigRepository, DatabaseConfigRepository>()
-                .AddSingleton<IPermissionService, PermissionService>()
                 .AddSingleton<IBackupRetentionManager, BackupRetentionManager>()
+                .AddSingleton<ITemplateAutoDiscoveryService, TemplateAutoDiscoveryService>()
                 .AddTransient<IAptPackageManager, AptPackageManager>()
                 .AddTransient<IBackupService, BackupService>()
                 .AddTransient<IRestoreService, RestoreService>()
+                .AddTransient<IExternalEditorService, ExternalEditorService>()
+                .AddTransient<DatabaseWizardService>()
                 .AddTransient<IDatabaseScanner, SystemdScanner>()
                 .AddTransient<IServiceManager, SystemdServiceManager>()
                 .AddTransient<DatabaseAppService>()
                 .AddTransient<ConsoleMenu>()
                 .BuildServiceProvider();
+
+            var autoDiscovery = serviceProvider.GetRequiredService<ITemplateAutoDiscoveryService>();
+            await autoDiscovery.AutoDiscoverAsync();
 
             var menu = serviceProvider.GetRequiredService<ConsoleMenu>();
             await menu.RunAsync();
@@ -69,4 +84,17 @@ class Program
         }
     }
 
+    private static async Task<bool> CheckSudoAsync()
+    {
+        try
+        {
+            var process = new ProcessExecutor();
+            var result = await process.ExecuteAsync("sudo", ["-n", "true"], timeoutSeconds: 5);
+            return result.Success;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

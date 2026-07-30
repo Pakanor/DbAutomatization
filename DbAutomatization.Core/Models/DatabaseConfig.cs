@@ -28,6 +28,8 @@ public class DatabaseConfig
     [JsonConverter(typeof(CommandArrayConverter))]
     public string[] SingleDatabaseRestoreCommand { get; set; } = [];
 
+    public string AptPackageName { get; set; } = string.Empty;
+
     public int BackupTimeoutSeconds { get; set; } = 300;
 
     public int RetentionCount { get; set; } = 0;

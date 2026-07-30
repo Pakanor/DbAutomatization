@@ -51,20 +51,45 @@ public class SystemdServiceManager : IServiceManager
             timeoutSeconds: 30,
             cancellationToken: cancellationToken);
 
+        if (!result.Success || string.IsNullOrWhiteSpace(result.Output))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[DEBUG] Komenda: {string.Join(" ", commandArgs)}");
+            Console.WriteLine($"[DEBUG] Exit: {result.ExitCode} | stdout: {result.Output} | stderr: {result.Error}");
+            Console.ResetColor();
+        }
+
         int col = config.OutputColumnIndex;
         var databases = new List<string>();
+
         foreach (string line in result.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
             string trimmed = line.Trim();
             if (string.IsNullOrEmpty(trimmed))
                 continue;
 
-            string[] parts = trimmed.Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries);
-            string name = col > 0 && parts.Length > col ? parts[col] : parts[0];
+            string[] parts;
+            if (trimmed.StartsWith('|'))
+            {
+                parts = trimmed.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            }
+            else if (trimmed.Contains('|'))
+            {
+                parts = trimmed.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            }
+            else
+            {
+                parts = trimmed.Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries);
+            }
 
-            if (!string.IsNullOrEmpty(name))
+            string name = parts.Length > 0
+                ? (col > 0 && parts.Length > col ? parts[col].Trim() : parts[0].Trim())
+                : string.Empty;
+
+            if (!string.IsNullOrEmpty(name) && !name.StartsWith("template"))
                 databases.Add(name);
         }
+
         return databases;
     }
 

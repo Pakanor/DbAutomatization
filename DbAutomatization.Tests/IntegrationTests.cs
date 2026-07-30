@@ -26,6 +26,8 @@ public class IntegrationTests : IDisposable
             TryDeleteFile(file);
         }
         TryDeleteFile(_configPath);
+        var backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        TryDeleteDir(backupDir);
         TryDeleteDir(_tempDir);
     }
 
@@ -44,8 +46,8 @@ public class IntegrationTests : IDisposable
             RetentionCount = 2
         });
 
-        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        CleanupTestFiles(baseDir);
+        var backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        CleanupTestFiles(backupDir);
 
         var result1 = await backupService.CreateBackupAsync("testdb");
         result1.Success.Should().BeTrue();
@@ -56,13 +58,13 @@ public class IntegrationTests : IDisposable
         result2.Success.Should().BeTrue();
         _createdFiles.Add(result2.FilePath);
 
-        Directory.GetFiles(baseDir, "backup_testdb*").Length.Should().Be(2);
+        Directory.GetFiles(backupDir, "backup_testdb*").Length.Should().Be(2);
 
         var result3 = await backupService.CreateBackupAsync("testdb");
         result3.Success.Should().BeTrue();
         _createdFiles.Add(result3.FilePath);
 
-        var remaining = Directory.GetFiles(baseDir, "backup_testdb*")
+        var remaining = Directory.GetFiles(backupDir, "backup_testdb*")
             .Select(Path.GetFileName)
             .OrderBy(n => n)
             .ToList();
@@ -75,6 +77,7 @@ public class IntegrationTests : IDisposable
 
     private static void CleanupTestFiles(string dir)
     {
+        if (!Directory.Exists(dir)) return;
         foreach (var f in Directory.GetFiles(dir, "backup_testdb*"))
             TryDeleteFile(f);
     }

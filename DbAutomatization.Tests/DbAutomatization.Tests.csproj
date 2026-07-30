@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DbAutomatization.Core\DbAutomatization.Core.csproj" />
     <ProjectReference Include="..\DbAutomatization.Infrastructure\DbAutomatization.Infrastructure.csproj" />
+    <ProjectReference Include="..\DbAutomatization.Cli\DbAutomatization.Cli.csproj" />
   </ItemGroup>
 
 </Project>

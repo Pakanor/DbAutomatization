@@ -132,11 +132,11 @@ public class SystemdServiceManagerTests
                     args[1] == "SELECT datname FROM pg_database"),
                 It.IsAny<int>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ProcessResult("template1\ntemplate0\npostgres", "", 0));
+            .ReturnsAsync(new ProcessResult("mydb\npostgres\ntest", "", 0));
 
         var databases = await _manager.GetDatabasesAsync("postgresql");
 
-        databases.Should().BeEquivalentTo(["template1", "template0", "postgres"]);
+        databases.Should().BeEquivalentTo(["mydb", "postgres", "test"]);
     }
 
     [Fact]
@@ -184,11 +184,11 @@ public class SystemdServiceManagerTests
                 It.IsAny<string[]>(),
                 It.IsAny<int>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ProcessResult("template1\ntemplate0\npostgres\n", "", 0));
+            .ReturnsAsync(new ProcessResult("mydb\npostgres\ntest\n", "", 0));
 
         var databases = await _manager.GetDatabasesAsync("postgresql");
 
-        databases.Should().BeEquivalentTo(["template1", "template0", "postgres"]);
+        databases.Should().BeEquivalentTo(["mydb", "postgres", "test"]);
     }
 
     [Fact]

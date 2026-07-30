@@ -19,13 +19,15 @@ public class ProcessExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_WithNonExistentFile_ThrowsWin32Exception()
+    public async Task ExecuteAsync_WithNonExistentFile_ReturnsFailure()
     {
         var executor = new ProcessExecutor();
 
-        var act = async () => await executor.ExecuteAsync("nonexistent_command_xyz", []);
+        var result = await executor.ExecuteAsync("nonexistent_command_xyz", []);
 
-        await act.Should().ThrowAsync<System.ComponentModel.Win32Exception>();
+        result.Success.Should().BeFalse();
+        result.ExitCode.Should().Be(-1);
+        result.Error.Should().NotBeNullOrEmpty();
     }
 
     [Fact]

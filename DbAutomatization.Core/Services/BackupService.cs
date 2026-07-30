@@ -1,3 +1,5 @@
+#pragma warning disable CA1416
+
 using DbAutomatization.Core.Models;
 
 namespace DbAutomatization.Core.Services;
@@ -41,10 +43,13 @@ public class BackupService : IBackupService
                 -1);
         }
 
+        string backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        Directory.CreateDirectory(backupDir);
+
         string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff");
         string dbNamePart = !string.IsNullOrEmpty(databaseName) ? $"_{databaseName}" : "";
         string fileName = $"backup_{serviceName}{dbNamePart}_{timestamp}.bak";
-        string fullPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
+        string fullPath = Path.Combine(backupDir, fileName);
         int timeout = config.BackupTimeoutSeconds;
 
         if (config.PreBackupCommand is { Length: > 0 })
@@ -96,11 +101,16 @@ public class BackupService : IBackupService
                 cancellationToken: cancellationToken);
         }
 
+        if (result.Success)
+        {
+            try { File.SetUnixFileMode(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead); } catch { }
+        }
+
         if (result.Success && config.RetentionCount > 0)
         {
             string filePrefix = $"backup_{serviceName}";
             await _retention.CleanupAsync(
-                AppDomain.CurrentDomain.BaseDirectory,
+                backupDir,
                 filePrefix,
                 config.RetentionCount);
         }

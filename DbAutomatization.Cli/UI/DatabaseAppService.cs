@@ -11,9 +11,9 @@ public class DatabaseAppService
     private readonly IAptPackageManager _apt;
     private readonly IBackupService _backup;
     private readonly IRestoreService _restore;
-    private readonly IPermissionService _permission;
-
-    public bool HasSudo => _permission.HasSudo;
+    private readonly DatabaseWizardService _wizard;
+    private readonly IExternalEditorService _editor;
+    private readonly IProcessExecutor _process;
 
     public DatabaseAppService(
         IDatabaseScanner scanner,
@@ -22,7 +22,9 @@ public class DatabaseAppService
         IAptPackageManager apt,
         IBackupService backup,
         IRestoreService restore,
-        IPermissionService permission)
+        DatabaseWizardService wizard,
+        IExternalEditorService editor,
+        IProcessExecutor process)
     {
         _scanner = scanner;
         _manager = manager;
@@ -30,7 +32,9 @@ public class DatabaseAppService
         _apt = apt;
         _backup = backup;
         _restore = restore;
-        _permission = permission;
+        _wizard = wizard;
+        _editor = editor;
+        _process = process;
     }
 
     public async Task HandleScanAsync()
@@ -101,18 +105,9 @@ public class DatabaseAppService
             string currentStatus = selectedDb.IsRunning ? "URUCHOMIONA" : "ZATRZYMANA";
             Console.WriteLine($"\n=== Zarządzanie bazą: {selectedDb.Name} [{currentStatus}] ===");
 
-            if (HasSudo)
-            {
-                Console.WriteLine("[1] Uruchom (Start)");
-                Console.WriteLine("[2] Zatrzymaj (Stop)");
-                Console.WriteLine("[3] Zrestartuj (Restart)");
-            }
-            else
-            {
-                Console.WriteLine("[1] Uruchom (Start) [Disabled — wymaga podwyższonych uprawnień]");
-                Console.WriteLine("[2] Zatrzymaj (Stop) [Disabled — wymaga podwyższonych uprawnień]");
-                Console.WriteLine("[3] Zrestartuj (Restart) [Disabled — wymaga podwyższonych uprawnień]");
-            }
+            Console.WriteLine("[1] Uruchom (Start)");
+            Console.WriteLine("[2] Zatrzymaj (Stop)");
+            Console.WriteLine("[3] Zrestartuj (Restart)");
 
             Console.WriteLine("[4] Wejdź do konsoli CLI");
             Console.WriteLine("[5] Backup");
@@ -127,31 +122,16 @@ public class DatabaseAppService
             switch (subChoice)
             {
                 case "1":
-                    if (!HasSudo)
-                    {
-                        Console.WriteLine("[!] Operacje systemd wymagają podwyższonych uprawnień (root lub passwordless sudo).");
-                        break;
-                    }
                     Console.WriteLine($"Uruchamianie {selectedDb.Name}...");
                     await _manager.StartServiceAsync(selectedDb.ServiceName);
                     break;
 
                 case "2":
-                    if (!HasSudo)
-                    {
-                        Console.WriteLine("[!] Operacje systemd wymagają podwyższonych uprawnień (root lub passwordless sudo).");
-                        break;
-                    }
                     Console.WriteLine($"Zatrzymywanie {selectedDb.Name}...");
                     await _manager.StopServiceAsync(selectedDb.ServiceName);
                     break;
 
                 case "3":
-                    if (!HasSudo)
-                    {
-                        Console.WriteLine("[!] Operacje systemd wymagają podwyższonych uprawnień (root lub passwordless sudo).");
-                        break;
-                    }
                     Console.WriteLine($"Restartowanie {selectedDb.Name}...");
                     await _manager.RestartServiceAsync(selectedDb.ServiceName);
                     break;
@@ -215,7 +195,8 @@ public class DatabaseAppService
                             }
                             else
                             {
-                                Console.WriteLine("[!] Nie można pobrać listy baz dla tego silnika. Wykonuję backup całego silnika.");
+                                Console.WriteLine("[!] Nie udało się pobrać listy baz. Anulowano.");
+                                break;
                             }
                         }
                     }
@@ -270,87 +251,127 @@ public class DatabaseAppService
         }
     }
 
-    public async Task HandleAddDatabaseAsync()
+    public async Task HandleAddDatabaseWizardAsync()
     {
-        Console.WriteLine("\n--- Dodawanie nowej bazy ---");
+        await _wizard.RunWizardAsync();
+    }
 
-        Console.Write("Podaj nazwę bazy w systemie (np. redis-server, postgresql): ");
-        var systemName = Console.ReadLine()?.ToLower().Trim();
-        if (string.IsNullOrWhiteSpace(systemName)) return;
+    public async Task HandleEditConfigAsync()
+    {
+        bool success = await _editor.EditConfigInExternalEditorAsync();
+        if (success)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("[V] Konfiguracja zaktualizowana pomyślnie.");
+            Console.ResetColor();
+        }
+    }
+
+    public async Task HandleAddDatabaseManualAsync()
+    {
+        Console.WriteLine("\n--- Dodawanie nowej bazy (ręczne) ---");
+
+        Console.Write("Podaj nazwę usługi systemd (np. redis-server, postgresql): ");
+        var serviceName = Console.ReadLine()?.ToLower().Trim();
+        if (string.IsNullOrWhiteSpace(serviceName)) return;
+
+        var checkResult = await _process.ExecuteAsync("systemctl", ["is-enabled", serviceName], timeoutSeconds: 5);
+        if (!checkResult.Success)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[X] Usługa '{serviceName}' nie istnieje w systemd. Nie można dodać nieistniejącej bazy.");
+            Console.ResetColor();
+            return;
+        }
 
         Console.Write("Podaj nazwę wyświetlaną w menu (np. Redis, PostgreSQL): ");
         var friendlyName = Console.ReadLine();
         if (string.IsNullOrWhiteSpace(friendlyName)) return;
 
-        Console.Write($"Podaj komendę CLI do wejścia w bazę (domyślnie: '{systemName}', ENTER aby zaakceptować): ");
+        Console.Write("Nazwa pakietu APT (ENTER = taka sama jak usługa): ");
+        var aptPkg = Console.ReadLine()?.Trim();
+        string aptPackageName = string.IsNullOrWhiteSpace(aptPkg) ? serviceName : aptPkg;
+
+        Console.Write($"Komenda CLI (ENTER = '{serviceName}'): ");
         var cliInput = Console.ReadLine()?.Trim();
         string[] cliCommand = string.IsNullOrWhiteSpace(cliInput)
-            ? [systemName]
+            ? [serviceName]
             : cliInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        Console.WriteLine("\nWskazówka dla backupu: Użyj {path} dla pliku wynikowego oraz opcjonalnie {db} dla nazwy bazy.");
-        Console.Write("Podaj komendę do backupu (elementy rozdziel spacją, ENTER jeśli brak): ");
+        Console.WriteLine("\n--- Backup ---");
+        Console.Write("Komenda backupu (użyj {path} dla pliku, {db} dla bazy; ENTER = brak): ");
         var backupInput = Console.ReadLine()?.Trim();
         string[] backupCommand = string.IsNullOrWhiteSpace(backupInput)
             ? []
             : backupInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        Console.Write("Podaj komendę do listowania baz danych (elementy rozdziel spacją, ENTER jeśli brak): ");
+        Console.Write("Komenda backupu pojedynczej bazy (ENTER = brak): ");
+        var singleBackupInput = Console.ReadLine()?.Trim();
+        string[] singleDatabaseBackupCommand = string.IsNullOrWhiteSpace(singleBackupInput)
+            ? []
+            : singleBackupInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        Console.Write("Komenda przed backupem (np. redis-cli SAVE; ENTER = brak): ");
+        var preBackupInput = Console.ReadLine()?.Trim();
+        string[] preBackupCommand = string.IsNullOrWhiteSpace(preBackupInput)
+            ? []
+            : preBackupInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        Console.WriteLine("\n--- Restore ---");
+        Console.Write("Komenda restore (ENTER = brak): ");
+        var restoreInput = Console.ReadLine()?.Trim();
+        string[] restoreCommand = string.IsNullOrWhiteSpace(restoreInput)
+            ? []
+            : restoreInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        Console.Write("Komenda restore pojedynczej bazy (ENTER = brak): ");
+        var singleRestoreInput = Console.ReadLine()?.Trim();
+        string[] singleDatabaseRestoreCommand = string.IsNullOrWhiteSpace(singleRestoreInput)
+            ? []
+            : singleRestoreInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        Console.WriteLine("\n--- Listowanie baz ---");
+        Console.Write("Komenda do listowania baz (ENTER = brak): ");
         var listInput = Console.ReadLine()?.Trim();
         string[] listDatabasesCommand = string.IsNullOrWhiteSpace(listInput)
             ? []
             : listInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        bool exists = await _apt.DoesPackageExistAsync(systemName);
+        var config = new DatabaseConfig
+        {
+            FriendlyName = friendlyName,
+            AptPackageName = aptPackageName,
+            CliCommand = cliCommand,
+            BackupCommand = backupCommand,
+            SingleDatabaseBackupCommand = singleDatabaseBackupCommand,
+            PreBackupCommand = preBackupCommand,
+            RestoreCommand = restoreCommand,
+            SingleDatabaseRestoreCommand = singleDatabaseRestoreCommand,
+            ListDatabasesCommand = listDatabasesCommand
+        };
+
+        bool exists = await _apt.DoesPackageExistAsync(config);
 
         if (exists)
         {
-            _configRepo.Register(systemName, new DatabaseConfig
-            {
-                FriendlyName = friendlyName,
-                CliCommand = cliCommand,
-                BackupCommand = backupCommand,
-                ListDatabasesCommand = listDatabasesCommand
-            });
+            _configRepo.Register(serviceName, config);
             Console.WriteLine($"\n[V] Baza '{friendlyName}' już istnieje w systemie i została dodana do monitorowania.");
             return;
         }
 
-        if (!HasSudo)
-        {
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"\n[!] Baza '{systemName}' nie jest zainstalowana. Instalacja przez APT wymaga podwyższonych uprawnień (root lub passwordless sudo).");
-            Console.ResetColor();
-            _configRepo.Register(systemName, new DatabaseConfig
-            {
-                FriendlyName = friendlyName,
-                CliCommand = cliCommand,
-                BackupCommand = backupCommand,
-                ListDatabasesCommand = listDatabasesCommand
-            });
-            Console.WriteLine($"Dodano '{friendlyName}' do monitorowania. Zainstaluj pakiet ręcznie przez sudo apt install {systemName}.");
-            return;
-        }
-
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write($"\n[!] Baza '{systemName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
+        Console.Write($"\n[!] Baza '{serviceName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
         Console.ResetColor();
 
         var answer = Console.ReadLine()?.ToLower().Trim();
 
         if (answer == "y" || answer == "yes")
         {
-            var (success, errorMessage) = await _apt.InstallPackageAsync(systemName, systemName);
+            var (success, errorMessage) = await _apt.InstallPackageAsync(config);
 
             if (success)
             {
-                _configRepo.Register(systemName, new DatabaseConfig
-                {
-                    FriendlyName = friendlyName,
-                    CliCommand = cliCommand,
-                    BackupCommand = backupCommand,
-                    ListDatabasesCommand = listDatabasesCommand
-                });
+                _configRepo.Register(serviceName, config);
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"\n[V] Sukces! Pomyślnie zainstalowano i dodano bazę {friendlyName} do monitorowania.");
                 Console.ResetColor();
@@ -358,13 +379,23 @@ public class DatabaseAppService
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{systemName}' nie powiodła się.");
+                Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{serviceName}' nie powiodła się.");
                 Console.ResetColor();
 
                 Console.WriteLine("\n--- Logi z systemu Linux ---");
                 Console.ForegroundColor = ConsoleColor.DarkGray;
                 Console.WriteLine(errorMessage);
                 Console.ResetColor();
+            }
+        }
+        else
+        {
+            Console.Write("Dodać bazę do konfiguracji mimo braku instalacji? (y/N): ");
+            var registerAnyway = Console.ReadLine()?.ToLower().Trim();
+            if (registerAnyway == "y" || registerAnyway == "yes")
+            {
+                _configRepo.Register(serviceName, config);
+                Console.WriteLine($"Dodano '{friendlyName}' do monitorowania.");
             }
         }
     }
@@ -391,15 +422,15 @@ public class DatabaseAppService
             return;
         }
 
-        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        var backupFiles = Directory.GetFiles(baseDir, $"backup_{serviceName}*")
+        var backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        var backupFiles = Directory.GetFiles(backupDir, $"backup_{serviceName}*")
             .Select(f => new FileInfo(f))
             .OrderByDescending(f => f.LastWriteTime)
             .ToList();
 
         if (backupFiles.Count == 0)
         {
-            Console.WriteLine($"\n[!] Brak plików backupu dla '{friendlyName}' w katalogu:\n  {baseDir}");
+            Console.WriteLine($"\n[!] Brak plików backupu dla '{friendlyName}' w katalogu:\n  {backupDir}");
             return;
         }
 
