@@ -54,12 +54,7 @@ public class BackupService : IBackupService
 
         if (config.PreBackupCommand is { Length: > 0 })
         {
-            string[] preArgs = config.PreBackupCommand
-                .Select(arg => arg.Replace("{path}", fullPath))
-                .ToArray();
-
-            if (!string.IsNullOrEmpty(databaseName))
-                preArgs = preArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
+            string[] preArgs = CommandTemplate.Substitute(config.PreBackupCommand, serviceName, fullPath, databaseName);
 
             var preResult = await _process.ExecuteAsync(
                 preArgs[0], preArgs[1..],
@@ -75,12 +70,7 @@ public class BackupService : IBackupService
             }
         }
 
-        string[] finalArgs = baseCommand
-            .Select(arg => arg.Replace("{path}", fullPath))
-            .ToArray();
-
-        if (!string.IsNullOrEmpty(databaseName))
-            finalArgs = finalArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
+        string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, fullPath, databaseName);
 
         bool hasPathInTemplate = baseCommand.Any(arg => arg.Contains("{path}"));
 
@@ -103,6 +93,7 @@ public class BackupService : IBackupService
 
         if (result.Success)
         {
+            // Best-effort: kopie robocze nie powinny blokować backupu, gdy chmod się nie powiedzie.
             try { File.SetUnixFileMode(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead); } catch { }
         }
 
@@ -112,7 +103,8 @@ public class BackupService : IBackupService
             await _retention.CleanupAsync(
                 backupDir,
                 filePrefix,
-                config.RetentionCount);
+                config.RetentionCount,
+                cancellationToken);
         }
 
         return new BackupResult(fullPath, result.Error, result.ExitCode);

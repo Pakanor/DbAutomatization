@@ -16,6 +16,15 @@ public class SystemdServiceManager : IServiceManager
 
     public async Task StartServiceAsync(string serviceName, CancellationToken cancellationToken = default)
     {
+        if (IsDocker(serviceName))
+        {
+            await _process.ExecuteAsync(
+                "docker", ["start", serviceName],
+                timeoutSeconds: 30,
+                cancellationToken: cancellationToken);
+            return;
+        }
+
         await _process.ExecuteAsync(
             "sudo", ["systemctl", "start", serviceName],
             timeoutSeconds: 30,
@@ -24,6 +33,15 @@ public class SystemdServiceManager : IServiceManager
 
     public async Task StopServiceAsync(string serviceName, CancellationToken cancellationToken = default)
     {
+        if (IsDocker(serviceName))
+        {
+            await _process.ExecuteAsync(
+                "docker", ["stop", serviceName],
+                timeoutSeconds: 30,
+                cancellationToken: cancellationToken);
+            return;
+        }
+
         await _process.ExecuteAsync(
             "sudo", ["systemctl", "stop", serviceName],
             timeoutSeconds: 30,
@@ -32,6 +50,15 @@ public class SystemdServiceManager : IServiceManager
 
     public async Task RestartServiceAsync(string serviceName, CancellationToken cancellationToken = default)
     {
+        if (IsDocker(serviceName))
+        {
+            await _process.ExecuteAsync(
+                "docker", ["restart", serviceName],
+                timeoutSeconds: 30,
+                cancellationToken: cancellationToken);
+            return;
+        }
+
         await _process.ExecuteAsync(
             "sudo", ["systemctl", "restart", serviceName],
             timeoutSeconds: 30,
@@ -44,7 +71,7 @@ public class SystemdServiceManager : IServiceManager
         if (config == null || config.ListDatabasesCommand == null || config.ListDatabasesCommand.Length == 0)
             return new List<string>();
 
-        string[] commandArgs = config.ListDatabasesCommand;
+        string[] commandArgs = CommandTemplate.Substitute(config.ListDatabasesCommand, serviceName);
 
         ProcessResult result = await _process.ExecuteAsync(
             commandArgs[0], commandArgs[1..],
@@ -59,31 +86,25 @@ public class SystemdServiceManager : IServiceManager
             Console.ResetColor();
         }
 
-        int col = config.OutputColumnIndex;
+        return ParseDatabasesOutput(result.Output, config.OutputColumnIndex);
+    }
+
+    private static List<string> ParseDatabasesOutput(string output, int columnIndex)
+    {
         var databases = new List<string>();
 
-        foreach (string line in result.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        foreach (string line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
             string trimmed = line.Trim();
             if (string.IsNullOrEmpty(trimmed))
                 continue;
 
-            string[] parts;
-            if (trimmed.StartsWith('|'))
-            {
-                parts = trimmed.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            }
-            else if (trimmed.Contains('|'))
-            {
-                parts = trimmed.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            }
-            else
-            {
-                parts = trimmed.Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries);
-            }
+            string[] parts = trimmed.Contains('|')
+                ? trimmed.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                : trimmed.Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries);
 
             string name = parts.Length > 0
-                ? (col > 0 && parts.Length > col ? parts[col].Trim() : parts[0].Trim())
+                ? (columnIndex > 0 && parts.Length > columnIndex ? parts[columnIndex].Trim() : parts[0].Trim())
                 : string.Empty;
 
             if (!string.IsNullOrEmpty(name) && !name.StartsWith("template"))
@@ -98,6 +119,14 @@ public class SystemdServiceManager : IServiceManager
         if (cliCommand == null || cliCommand.Length == 0)
             cliCommand = [serviceName];
 
+        cliCommand = CommandTemplate.Substitute(cliCommand, serviceName);
+
         await _process.ExecuteInteractiveAsync(cliCommand[0], cliCommand[1..], cancellationToken);
+    }
+
+    private bool IsDocker(string serviceName)
+    {
+        var config = _configRepo.Get(serviceName);
+        return config?.EngineType == "docker";
     }
 }

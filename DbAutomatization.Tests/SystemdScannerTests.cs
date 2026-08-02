@@ -114,4 +114,108 @@ public class SystemdScannerTests
 
         results.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task ScanForDatabasesAsync_DockerContainer_Running_DetectedAsRunning()
+    {
+        var configs = new Dictionary<string, DatabaseConfig>
+        {
+            ["postgres-main"] = new() { FriendlyName = "PostgreSQL (Docker)", EngineType = "docker" }
+        };
+
+        _configRepoMock.Setup(r => r.GetAll()).Returns(configs);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "systemctl",
+                It.IsAny<string[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args =>
+                    args[0] == "inspect" &&
+                    args[1] == "-f" &&
+                    args[2] == "{{.State.Running}}" &&
+                    args[3] == "postgres-main"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("true", "", 0));
+
+        var results = await _scanner.ScanForDatabasesAsync();
+
+        results.Should().HaveCount(1);
+        results[0].ServiceName.Should().Be("postgres-main");
+        results[0].IsInstalled.Should().BeTrue();
+        results[0].IsRunning.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ScanForDatabasesAsync_DockerContainer_Stopped_DetectedAsInstalledButStopped()
+    {
+        var configs = new Dictionary<string, DatabaseConfig>
+        {
+            ["postgres-main"] = new() { FriendlyName = "PostgreSQL (Docker)", EngineType = "docker" }
+        };
+
+        _configRepoMock.Setup(r => r.GetAll()).Returns(configs);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "systemctl",
+                It.IsAny<string[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args => args[0] == "inspect"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("false", "", 0));
+
+        var results = await _scanner.ScanForDatabasesAsync();
+
+        results.Should().HaveCount(1);
+        results[0].IsInstalled.Should().BeTrue();
+        results[0].IsRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ScanForDatabasesAsync_DockerContainer_Missing_DetectedAsNotInstalled()
+    {
+        var configs = new Dictionary<string, DatabaseConfig>
+        {
+            ["postgres-main"] = new() { FriendlyName = "PostgreSQL (Docker)", EngineType = "docker" }
+        };
+
+        _configRepoMock.Setup(r => r.GetAll()).Returns(configs);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "systemctl",
+                It.IsAny<string[]>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args => args[0] == "inspect"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "No such container", 1));
+
+        var results = await _scanner.ScanForDatabasesAsync();
+
+        results.Should().HaveCount(1);
+        results[0].IsInstalled.Should().BeFalse();
+        results[0].IsRunning.Should().BeFalse();
+    }
 }

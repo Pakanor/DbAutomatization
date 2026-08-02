@@ -67,8 +67,9 @@ public class ConsoleMenu
         while (true)
         {
             Console.WriteLine("\n--- Dodawanie nowej bazy ---");
-            Console.WriteLine("[1] Szybki kreator (wybierz szablon)");
-            Console.WriteLine("[2] Zaawansowane (edytor nano/vim)");
+            Console.WriteLine("[1] Baza systemowa (systemd)");
+            Console.WriteLine("[2] Baza Dockerowa (kontener)");
+            Console.WriteLine("[3] Zaawansowane (edytor nano/vim)");
             Console.WriteLine("[0] Powrót");
             Console.Write("\nWybierz opcję: ");
 
@@ -82,6 +83,9 @@ public class ConsoleMenu
                     await _appService.HandleAddDatabaseWizardAsync();
                     return;
                 case "2":
+                    await _appService.HandleAddDatabaseDockerAsync();
+                    return;
+                case "3":
                     Console.WriteLine("\nOtwieranie edytora z konfiguracją. Dodaj nowy wpis ręcznie, zapisz i zamknij.");
                     bool success = await _editor.EditConfigInExternalEditorAsync();
                     if (success)

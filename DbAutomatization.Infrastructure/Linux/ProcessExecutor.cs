@@ -15,17 +15,8 @@ public class ProcessExecutor : IProcessExecutor
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var arg in arguments)
-            startInfo.ArgumentList.Add(arg);
+        var startInfo = CreateStartInfo(fileName, captureIo: true);
+        AddArguments(startInfo, arguments);
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -53,14 +44,8 @@ public class ProcessExecutor : IProcessExecutor
         string[] arguments,
         CancellationToken cancellationToken = default)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            UseShellExecute = false
-        };
-
-        foreach (var arg in arguments)
-            startInfo.ArgumentList.Add(arg);
+        var startInfo = CreateStartInfo(fileName, captureIo: false);
+        AddArguments(startInfo, arguments);
 
         using var process = Process.Start(startInfo);
 
@@ -78,17 +63,8 @@ public class ProcessExecutor : IProcessExecutor
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var arg in arguments)
-            startInfo.ArgumentList.Add(arg);
+        var startInfo = CreateStartInfo(fileName, captureIo: true);
+        AddArguments(startInfo, arguments);
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -121,18 +97,8 @@ public class ProcessExecutor : IProcessExecutor
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = fileName,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        foreach (var arg in arguments)
-            startInfo.ArgumentList.Add(arg);
+        var startInfo = CreateStartInfo(fileName, captureIo: true);
+        AddArguments(startInfo, arguments);
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -161,5 +127,24 @@ public class ProcessExecutor : IProcessExecutor
         string error = await stderrTask;
 
         return new ProcessResult(output, error, process.ExitCode);
+    }
+
+    private static ProcessStartInfo CreateStartInfo(string fileName, bool captureIo)
+    {
+        return new ProcessStartInfo
+        {
+            FileName = fileName,
+            RedirectStandardOutput = captureIo,
+            RedirectStandardError = captureIo,
+            RedirectStandardInput = captureIo,
+            UseShellExecute = false,
+            CreateNoWindow = captureIo
+        };
+    }
+
+    private static void AddArguments(ProcessStartInfo startInfo, string[] arguments)
+    {
+        foreach (var arg in arguments)
+            startInfo.ArgumentList.Add(arg);
     }
 }

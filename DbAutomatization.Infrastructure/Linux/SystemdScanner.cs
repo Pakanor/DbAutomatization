@@ -32,6 +32,14 @@ public class SystemdScanner : IDatabaseScanner
         foreach (var kvp in trackedServices)
         {
             string serviceName = kvp.Key;
+            var config = kvp.Value;
+
+            if (config.EngineType == "docker")
+            {
+                results.Add(await ScanDockerContainerAsync(serviceName, config.FriendlyName, cancellationToken));
+                continue;
+            }
+
             string unitName = $"{serviceName}.service";
             bool isInstalled = existingUnits.Contains(unitName);
 
@@ -48,7 +56,7 @@ public class SystemdScanner : IDatabaseScanner
 
             results.Add(new DetectedDatabase
             {
-                Name = kvp.Value.FriendlyName,
+                Name = config.FriendlyName,
                 ServiceName = serviceName,
                 IsInstalled = isInstalled,
                 IsRunning = isRunning
@@ -56,6 +64,28 @@ public class SystemdScanner : IDatabaseScanner
         }
 
         return results;
+    }
+
+    private async Task<DetectedDatabase> ScanDockerContainerAsync(
+        string containerName,
+        string friendlyName,
+        CancellationToken cancellationToken)
+    {
+        var inspectResult = await _process.ExecuteAsync(
+            "docker", ["inspect", "-f", "{{.State.Running}}", containerName],
+            timeoutSeconds: 10,
+            cancellationToken: cancellationToken);
+
+        bool isInstalled = inspectResult.Success;
+        bool isRunning = isInstalled && inspectResult.Output.Trim() == "true";
+
+        return new DetectedDatabase
+        {
+            Name = friendlyName,
+            ServiceName = containerName,
+            IsInstalled = isInstalled,
+            IsRunning = isRunning
+        };
     }
 
     private static HashSet<string> ParseUnitFiles(string output)

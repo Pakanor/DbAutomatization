@@ -40,22 +40,58 @@ public class DatabaseConfigRepositoryTests
             var all = repo.GetAll();
 
             all.Should().ContainKey("postgresql");
-            all["postgresql"].AptPackageName.Should().Be("postgresql");
             all["postgresql"].BackupCommand.Should().BeEquivalentTo(
                 ["sudo", "-u", "postgres", "pg_dumpall"]);
-            all["mariadb"].AptPackageName.Should().Be("mariadb-server");
             all["mariadb"].BackupCommand.Should().BeEquivalentTo(
                 ["sudo", "mariadb-dump", "--all-databases"]);
-            all["redis-server"].AptPackageName.Should().Be("redis-server");
             all["redis-server"].PreBackupCommand.Should().BeEquivalentTo(["redis-cli", "SAVE"]);
             all["redis-server"].BackupCommand.Should().BeEquivalentTo(["sudo", "cp", "/var/lib/redis/dump.rdb", "{path}"]);
             all.Should().ContainKey("influxdb");
-            all["influxdb"].AptPackageName.Should().Be("influxdb");
             all["influxdb"].FriendlyName.Should().Be("InfluxDB");
             all["influxdb"].ListDatabasesCommand.Should().BeEquivalentTo(["influx", "bucket", "list", "--hide-headers"]);
             all["influxdb"].OutputColumnIndex.Should().Be(1);
             all.Should().ContainKey("mongod");
-            all["mongod"].AptPackageName.Should().Be("mongodb-org");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
+    public void Defaults_ContainDockerTemplatesWithDockerExecCommands()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var repo = CreateRepo(tempDir);
+            var all = repo.GetAll();
+
+            all.Should().ContainKey("postgres-main");
+            all["postgres-main"].EngineType.Should().Be("docker");
+            all["postgres-main"].BackupCommand.Should().BeEquivalentTo(
+                ["docker", "exec", "-i", "{serviceName}", "pg_dumpall", "-U", "postgres"]);
+            all["postgres-main"].CliCommand.Should().BeEquivalentTo(
+                ["docker", "exec", "-it", "{serviceName}", "psql", "-U", "postgres"]);
+            all["postgres-main"].RestoreCommand.Should().BeEquivalentTo(
+                ["docker", "exec", "-i", "{serviceName}", "psql", "-U", "postgres"]);
+
+            all.Should().ContainKey("mariadb-main");
+            all["mariadb-main"].EngineType.Should().Be("docker");
+            all["mariadb-main"].BackupCommand.Should().BeEquivalentTo(
+                ["docker", "exec", "-i", "{serviceName}", "mariadb-dump", "--all-databases"]);
+
+            all.Should().ContainKey("redis-main");
+            all["redis-main"].EngineType.Should().Be("docker");
+            all["redis-main"].BackupCommand.Should().BeEquivalentTo(
+                ["docker", "cp", "{serviceName}:/data/dump.rdb", "{path}"]);
+
+            all.Should().ContainKey("mongod-main");
+            all["mongod-main"].EngineType.Should().Be("docker");
+            all.Should().ContainKey("influxdb-main");
+            all["influxdb-main"].EngineType.Should().Be("docker");
         }
         finally
         {
@@ -130,7 +166,6 @@ public class DatabaseConfigRepositoryTests
                 ["sudo", "-u", "postgres", "psql", "--set", "ON_ERROR_STOP=on"]);
             config.SingleDatabaseRestoreCommand.Should().BeEquivalentTo(
                 ["sudo", "-u", "postgres", "psql", "--set", "ON_ERROR_STOP=on", "-d", "{db}"]);
-            config.AptPackageName.Should().Be("postgresql");
         }
         finally
         {
@@ -167,7 +202,6 @@ public class DatabaseConfigRepositoryTests
                 ["sudo", "mariadb"]);
             config.SingleDatabaseRestoreCommand.Should().BeEquivalentTo(
                 ["sudo", "mariadb", "{db}"]);
-            config.AptPackageName.Should().Be("mariadb-server");
         }
         finally
         {

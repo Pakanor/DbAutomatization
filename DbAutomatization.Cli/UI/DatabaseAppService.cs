@@ -8,7 +8,6 @@ public class DatabaseAppService
     private readonly IDatabaseScanner _scanner;
     private readonly IServiceManager _manager;
     private readonly IDatabaseConfigRepository _configRepo;
-    private readonly IAptPackageManager _apt;
     private readonly IBackupService _backup;
     private readonly IRestoreService _restore;
     private readonly DatabaseWizardService _wizard;
@@ -19,7 +18,6 @@ public class DatabaseAppService
         IDatabaseScanner scanner,
         IServiceManager manager,
         IDatabaseConfigRepository configRepo,
-        IAptPackageManager apt,
         IBackupService backup,
         IRestoreService restore,
         DatabaseWizardService wizard,
@@ -29,7 +27,6 @@ public class DatabaseAppService
         _scanner = scanner;
         _manager = manager;
         _configRepo = configRepo;
-        _apt = apt;
         _backup = backup;
         _restore = restore;
         _wizard = wizard;
@@ -163,13 +160,10 @@ public class DatabaseAppService
                         Console.Write("\nWybór: ");
 
                         var modeChoice = Console.ReadLine()?.Trim();
-                        if (modeChoice == "0" || modeChoice != "2")
+                        if (modeChoice == "0")
                         {
-                            if (modeChoice == "0")
-                            {
-                                Console.WriteLine("Anulowano.");
-                                break;
-                            }
+                            Console.WriteLine("Anulowano.");
+                            break;
                         }
 
                         if (modeChoice == "2")
@@ -253,7 +247,12 @@ public class DatabaseAppService
 
     public async Task HandleAddDatabaseWizardAsync()
     {
-        await _wizard.RunWizardAsync();
+        await _wizard.RunSystemdWizardAsync();
+    }
+
+    public async Task HandleAddDatabaseDockerAsync()
+    {
+        await _wizard.RunDockerWizardAsync();
     }
 
     public async Task HandleEditConfigAsync()
@@ -287,10 +286,6 @@ public class DatabaseAppService
         Console.Write("Podaj nazwę wyświetlaną w menu (np. Redis, PostgreSQL): ");
         var friendlyName = Console.ReadLine();
         if (string.IsNullOrWhiteSpace(friendlyName)) return;
-
-        Console.Write("Nazwa pakietu APT (ENTER = taka sama jak usługa): ");
-        var aptPkg = Console.ReadLine()?.Trim();
-        string aptPackageName = string.IsNullOrWhiteSpace(aptPkg) ? serviceName : aptPkg;
 
         Console.Write($"Komenda CLI (ENTER = '{serviceName}'): ");
         var cliInput = Console.ReadLine()?.Trim();
@@ -340,7 +335,6 @@ public class DatabaseAppService
         var config = new DatabaseConfig
         {
             FriendlyName = friendlyName,
-            AptPackageName = aptPackageName,
             CliCommand = cliCommand,
             BackupCommand = backupCommand,
             SingleDatabaseBackupCommand = singleDatabaseBackupCommand,
@@ -350,54 +344,8 @@ public class DatabaseAppService
             ListDatabasesCommand = listDatabasesCommand
         };
 
-        bool exists = await _apt.DoesPackageExistAsync(config);
-
-        if (exists)
-        {
-            _configRepo.Register(serviceName, config);
-            Console.WriteLine($"\n[V] Baza '{friendlyName}' już istnieje w systemie i została dodana do monitorowania.");
-            return;
-        }
-
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write($"\n[!] Baza '{serviceName}' nie jest zainstalowana. Czy chcesz ją teraz zainstalować przez APT? (y/n): ");
-        Console.ResetColor();
-
-        var answer = Console.ReadLine()?.ToLower().Trim();
-
-        if (answer == "y" || answer == "yes")
-        {
-            var (success, errorMessage) = await _apt.InstallPackageAsync(config);
-
-            if (success)
-            {
-                _configRepo.Register(serviceName, config);
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($"\n[V] Sukces! Pomyślnie zainstalowano i dodano bazę {friendlyName} do monitorowania.");
-                Console.ResetColor();
-            }
-            else
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\n[X] Błąd: Instalacja pakietu '{serviceName}' nie powiodła się.");
-                Console.ResetColor();
-
-                Console.WriteLine("\n--- Logi z systemu Linux ---");
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine(errorMessage);
-                Console.ResetColor();
-            }
-        }
-        else
-        {
-            Console.Write("Dodać bazę do konfiguracji mimo braku instalacji? (y/N): ");
-            var registerAnyway = Console.ReadLine()?.ToLower().Trim();
-            if (registerAnyway == "y" || registerAnyway == "yes")
-            {
-                _configRepo.Register(serviceName, config);
-                Console.WriteLine($"Dodano '{friendlyName}' do monitorowania.");
-            }
-        }
+        _configRepo.Register(serviceName, config);
+        Console.WriteLine($"\n[V] Baza '{friendlyName}' (usługa systemd '{serviceName}') została dodana do monitorowania.");
     }
 
     public void HandleRemoveDatabase()

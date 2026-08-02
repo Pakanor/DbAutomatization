@@ -4,8 +4,14 @@ namespace DbAutomatization.Infrastructure.Linux;
 
 public class BackupRetentionManager : IBackupRetentionManager
 {
-    public Task CleanupAsync(string backupDirectory, string filePrefix, int retentionCount)
+    public Task CleanupAsync(
+        string backupDirectory,
+        string filePrefix,
+        int retentionCount,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (retentionCount <= 0 || !Directory.Exists(backupDirectory))
             return Task.CompletedTask;
 
@@ -20,6 +26,8 @@ public class BackupRetentionManager : IBackupRetentionManager
         var toDelete = files.Skip(retentionCount);
         foreach (var file in toDelete)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            // Best-effort: zablokowany plik nie powinien zatrzymać już udanego backupu.
             try
             {
                 file.Delete();

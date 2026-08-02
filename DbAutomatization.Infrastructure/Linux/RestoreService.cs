@@ -46,12 +46,7 @@ public class RestoreService : IRestoreService
                 -1);
         }
 
-        string[] finalArgs = baseCommand
-            .Select(arg => arg.Replace("{path}", filePath))
-            .ToArray();
-
-        if (!string.IsNullOrEmpty(databaseName))
-            finalArgs = finalArgs.Select(arg => arg.Replace("{db}", databaseName)).ToArray();
+        string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, filePath, databaseName);
 
         bool hasPathInTemplate = baseCommand.Any(arg => arg.Contains("{path}"));
 

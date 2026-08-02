@@ -101,6 +101,7 @@ public class ExternalEditorService : IExternalEditorService
 
     private static void TryDeleteFile(string path)
     {
+        // Best-effort: plik tymczasowy w finally — brak usunięcia nie jest błędem krytycznym.
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 }

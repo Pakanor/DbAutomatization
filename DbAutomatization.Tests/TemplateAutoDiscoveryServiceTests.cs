@@ -31,6 +31,11 @@ public class TemplateAutoDiscoveryServiceTests
                 "systemctl", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessResult("enabled", "", 0));
 
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "No such container", 1));
+
         await _service.AutoDiscoverAsync();
 
         _configRepoMock.Verify(r => r.Register(It.IsAny<string>(), It.IsAny<DatabaseConfig>()),
@@ -54,6 +59,11 @@ public class TemplateAutoDiscoveryServiceTests
                 "systemctl", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessResult("", "disabled", 1));
 
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "No such container", 1));
+
         await _service.AutoDiscoverAsync();
 
         _configRepoMock.Verify(r => r.Register("postgresql", It.IsAny<DatabaseConfig>()), Times.Never);
@@ -70,6 +80,11 @@ public class TemplateAutoDiscoveryServiceTests
             .Setup(p => p.ExecuteAsync(
                 "systemctl", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessResult("", "disabled", 1));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "No such container", 1));
 
         await _service.AutoDiscoverAsync();
 
@@ -100,10 +115,51 @@ public class TemplateAutoDiscoveryServiceTests
                 It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProcessResult("", "disabled", 1));
 
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "No such container", 1));
+
         await _service.AutoDiscoverAsync();
 
         registeredConfig.Should().NotBeNull();
         registeredConfig!.FriendlyName.Should().Be("PostgreSQL");
-        registeredConfig!.AptPackageName.Should().Be("postgresql");
+    }
+
+    [Fact]
+    public async Task AutoDiscoverAsync_DockerContainerPresent_RegistersDockerTemplate()
+    {
+        _configRepoMock
+            .Setup(r => r.GetAll())
+            .Returns(new Dictionary<string, DatabaseConfig>());
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "systemctl", It.IsAny<string[]>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "disabled", 1));
+
+        DatabaseConfig? registeredDocker = null;
+        _configRepoMock
+            .Setup(r => r.Register("postgres-main", It.IsAny<DatabaseConfig>()))
+            .Callback<string, DatabaseConfig>((key, config) => registeredDocker = config);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker", It.Is<string[]>(a => a[0] == "inspect" && a[1] == "postgres-main"),
+                It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker", It.Is<string[]>(a => a[0] == "inspect" && a[1] != "postgres-main"),
+                It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "No such container", 1));
+
+        await _service.AutoDiscoverAsync();
+
+        registeredDocker.Should().NotBeNull();
+        registeredDocker!.EngineType.Should().Be("docker");
+        registeredDocker.BackupCommand.Should().BeEquivalentTo(
+            ["docker", "exec", "-i", "{serviceName}", "pg_dumpall", "-U", "postgres"]);
     }
 }

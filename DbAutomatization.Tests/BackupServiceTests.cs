@@ -196,7 +196,8 @@ public class BackupServiceTests
         _retentionMock.Verify(r => r.CleanupAsync(
             It.IsAny<string>(),
             "backup_mongod",
-            5), Times.Once);
+            5,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -225,7 +226,8 @@ public class BackupServiceTests
         _retentionMock.Verify(r => r.CleanupAsync(
             It.IsAny<string>(),
             It.IsAny<string>(),
-            It.IsAny<int>()), Times.Never);
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -354,5 +356,89 @@ public class BackupServiceTests
         var result = await _service.CreateBackupAsync("test");
 
         result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DockerExecArguments_ArePassedToExecutor()
+    {
+        var config = new DatabaseConfig
+        {
+            EngineType = "docker",
+            FriendlyName = "PostgreSQL (Docker)",
+            BackupCommand = ["docker", "exec", "-i", "{serviceName}", "pg_dumpall", "-U", "postgres"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgres-main")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "docker",
+                It.Is<string[]>(args =>
+                    args.Length == 6 &&
+                    args[0] == "exec" &&
+                    args[1] == "-i" &&
+                    args[2] == "postgres-main" &&
+                    args[3] == "pg_dumpall" &&
+                    args[4] == "-U" &&
+                    args[5] == "postgres"),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("postgres-main");
+
+        result.Success.Should().BeTrue();
+        _processMock.Verify(p => p.ExecuteAndStreamOutputAsync(
+            "docker",
+            It.Is<string[]>(args =>
+                args.Length == 6 &&
+                args[0] == "exec" &&
+                args[1] == "-i" &&
+                args[2] == "postgres-main" &&
+                args[3] == "pg_dumpall" &&
+                args[4] == "-U" &&
+                args[5] == "postgres"),
+            It.IsAny<Stream>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DockerSingleDatabaseBackup_SubstitutesServiceNameAndDb()
+    {
+        var config = new DatabaseConfig
+        {
+            EngineType = "docker",
+            FriendlyName = "MariaDB (Docker)",
+            BackupCommand = ["docker", "exec", "-i", "{serviceName}", "mariadb-dump", "--all-databases"],
+            SingleDatabaseBackupCommand = ["docker", "exec", "-i", "{serviceName}", "mariadb-dump", "{db}"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("mariadb-main")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "docker",
+                It.IsAny<string[]>(),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("mariadb-main", "mydb");
+
+        result.Success.Should().BeTrue();
+        _processMock.Verify(p => p.ExecuteAndStreamOutputAsync(
+            "docker",
+            It.Is<string[]>(args =>
+                args[0] == "exec" &&
+                args[1] == "-i" &&
+                args[2] == "mariadb-main" &&
+                args[3] == "mariadb-dump" &&
+                args[4] == "mydb"),
+            It.IsAny<Stream>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

@@ -5,6 +5,8 @@ namespace DbAutomatization.Core.Models;
 
 public class DatabaseConfig
 {
+    public string EngineType { get; set; } = "systemd"; // Obsługiwane wartości: "systemd" | "docker"
+
     public string FriendlyName { get; set; } = string.Empty;
 
     [JsonConverter(typeof(CommandArrayConverter))]
@@ -27,8 +29,6 @@ public class DatabaseConfig
 
     [JsonConverter(typeof(CommandArrayConverter))]
     public string[] SingleDatabaseRestoreCommand { get; set; } = [];
-
-    public string AptPackageName { get; set; } = string.Empty;
 
     public int BackupTimeoutSeconds { get; set; } = 300;
 

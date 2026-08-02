@@ -218,4 +218,123 @@ public class SystemdServiceManagerTests
             It.IsAny<string[]>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task StartServiceAsync_DockerEngine_UsesDockerStart()
+    {
+        _configRepoMock.Setup(r => r.Get("postgres-main")).Returns(new DatabaseConfig { EngineType = "docker" });
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args => args[0] == "start" && args[1] == "postgres-main"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        await _manager.StartServiceAsync("postgres-main");
+
+        _processMock.Verify(p => p.ExecuteAsync(
+            "docker",
+            It.Is<string[]>(args => args[0] == "start" && args[1] == "postgres-main"),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StopServiceAsync_DockerEngine_UsesDockerStop()
+    {
+        _configRepoMock.Setup(r => r.Get("mariadb-main")).Returns(new DatabaseConfig { EngineType = "docker" });
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args => args[0] == "stop" && args[1] == "mariadb-main"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        await _manager.StopServiceAsync("mariadb-main");
+
+        _processMock.Verify(p => p.ExecuteAsync(
+            "docker",
+            It.Is<string[]>(args => args[0] == "stop" && args[1] == "mariadb-main"),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RestartServiceAsync_DockerEngine_UsesDockerRestart()
+    {
+        _configRepoMock.Setup(r => r.Get("redis-main")).Returns(new DatabaseConfig { EngineType = "docker" });
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args => args[0] == "restart" && args[1] == "redis-main"),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        await _manager.RestartServiceAsync("redis-main");
+
+        _processMock.Verify(p => p.ExecuteAsync(
+            "docker",
+            It.Is<string[]>(args => args[0] == "restart" && args[1] == "redis-main"),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task OpenDatabaseCliAsync_Docker_SubstitutesServiceName()
+    {
+        _processMock
+            .Setup(p => p.ExecuteInteractiveAsync(
+                "docker",
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _manager.OpenDatabaseCliAsync(
+            "postgres-main",
+            ["docker", "exec", "-it", "{serviceName}", "psql", "-U", "postgres"]);
+
+        _processMock.Verify(p => p.ExecuteInteractiveAsync(
+            "docker",
+            It.Is<string[]>(args =>
+                args[0] == "exec" &&
+                args.Contains("-it") &&
+                args.Contains("postgres-main") &&
+                !args.Contains("{serviceName}")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetDatabasesAsync_DockerEngine_SubstitutesServiceName()
+    {
+        var config = new DatabaseConfig
+        {
+            EngineType = "docker",
+            ListDatabasesCommand = ["docker", "exec", "-i", "{serviceName}", "psql", "-U", "postgres", "-l", "-t", "-A"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgres-main")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "docker",
+                It.Is<string[]>(args => args.Contains("postgres-main") && !args.Contains("{serviceName}")),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("mydb\npostgres\ntest", "", 0));
+
+        var databases = await _manager.GetDatabasesAsync("postgres-main");
+
+        databases.Should().BeEquivalentTo(["mydb", "postgres", "test"]);
+        _processMock.Verify(p => p.ExecuteAsync(
+            "docker",
+            It.Is<string[]>(args => args[0] == "exec" && args[2] == "postgres-main"),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 }
