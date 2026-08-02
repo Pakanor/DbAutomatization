@@ -32,6 +32,6 @@ obj/
 *.nuget.targets
 openspec
 .opencode
-
+publish/
 ## Backups
 backups/
