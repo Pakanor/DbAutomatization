@@ -217,9 +217,14 @@ public class DatabaseAppService
                         }
                     }
 
+                    Console.Write("Kompresować backup? (T/n): ");
+                    var compressInput = Console.ReadLine()?.ToLower().Trim();
+                    bool compress = compressInput != "n" && compressInput != "no";
+
                     var backupResult = await _backup.CreateBackupAsync(
                         selectedDb.ServiceName,
-                        selectedDatabaseName);
+                        selectedDatabaseName,
+                        compress);
 
                     if (backupResult.Success)
                         Console.WriteLine($"[V] Backup wykonany pomyślnie!\nPlik zapisano w: {backupResult.FilePath}");
