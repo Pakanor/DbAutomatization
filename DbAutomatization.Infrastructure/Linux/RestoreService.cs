@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DbAutomatization.Core.Exceptions;
 using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
@@ -54,10 +55,50 @@ public class RestoreService : IRestoreService
                 cancellationToken: cancellationToken);
         }
 
+        return await RestoreFromFileAsync(finalArgs, filePath, cancellationToken);
+    }
+
+    private async Task<ProcessResult> RestoreFromFileAsync(
+        string[] finalArgs,
+        string filePath,
+        CancellationToken cancellationToken)
+    {
+        bool isCompressed = IsGZipFile(filePath);
+
+        if (isCompressed)
+        {
+            await using var fileStream = File.OpenRead(filePath);
+            await using var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress, leaveOpen: false);
+            return await _process.ExecuteWithStdinStreamAsync(
+                finalArgs[0], finalArgs[1..], gzipStream,
+                timeoutSeconds: 300,
+                cancellationToken: cancellationToken);
+        }
+
         return await _process.ExecuteWithStdinFileAsync(
             finalArgs[0], finalArgs[1..], filePath,
             timeoutSeconds: 300,
             cancellationToken: cancellationToken);
+    }
+
+    private static bool IsGZipFile(string filePath)
+    {
+        if (filePath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(filePath);
+            var buffer = new byte[2];
+            int read = stream.Read(buffer, 0, 2);
+            return read == 2 && buffer[0] == 0x1F && buffer[1] == 0x8B;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void VerifyBackupFile(string filePath, string backupDirectory, DatabaseConfig config)
@@ -88,20 +129,12 @@ public class RestoreService : IRestoreService
     private static void ValidateFileExtension(string filePath, DatabaseConfig config)
     {
         string extension = Path.GetExtension(filePath).ToLowerInvariant();
-        string engineType = config.EngineType?.ToLowerInvariant() ?? "systemd";
-
-        bool isValidExtension = engineType switch
-        {
-            "systemd" => extension is ".sql" or ".bak" or ".dump" or ".bak",
-            "docker" => extension is ".sql" or ".bak" or ".dump" or ".bak",
-            _ => extension is ".sql" or ".bak" or ".dump" or ".bak"
-        };
-
-        if (!isValidExtension)
+        var allowedExtensions = new[] { ".sql", ".bak", ".dump", ".gz" };
+        if (!allowedExtensions.Contains(extension))
         {
             throw new DatabaseConfigurationException(
                 $"Plik backupu '{filePath}' ma nieobsługiwane rozszerzenie '{extension}'. " +
-                "Oczekiwane: .sql, .bak, .dump");
+                "Oczekiwane: .sql, .bak, .dump, .gz");
         }
     }
 

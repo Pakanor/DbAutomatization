@@ -129,6 +129,47 @@ public class ProcessExecutor : IProcessExecutor
         return new ProcessResult(output, error, process.ExitCode);
     }
 
+    public async Task<ProcessResult> ExecuteWithStdinStreamAsync(
+        string fileName,
+        string[] arguments,
+        Stream inputStream,
+        int timeoutSeconds = 300,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        var startInfo = CreateStartInfo(fileName, captureIo: true);
+        AddArguments(startInfo, arguments);
+
+        using var process = new Process { StartInfo = startInfo };
+        try
+        {
+            process.Start();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return new ProcessResult(string.Empty, ex.Message, -1);
+        }
+
+        var stdinTask = Task.Run(async () =>
+        {
+            await inputStream.CopyToAsync(process.StandardInput.BaseStream, timeoutCts.Token);
+            process.StandardInput.Close();
+        }, timeoutCts.Token);
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync(timeoutCts.Token);
+        await stdinTask;
+
+        string output = await stdoutTask;
+        string error = await stderrTask;
+
+        return new ProcessResult(output, error, process.ExitCode);
+    }
+
     private static ProcessStartInfo CreateStartInfo(string fileName, bool captureIo)
     {
         return new ProcessStartInfo
