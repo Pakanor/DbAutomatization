@@ -13,6 +13,7 @@ public class DatabaseAppService
     private readonly DatabaseWizardService _wizard;
     private readonly IExternalEditorService _editor;
     private readonly IProcessExecutor _process;
+    private readonly IBackupScheduler _scheduler;
 
     public DatabaseAppService(
         IDatabaseScanner scanner,
@@ -22,7 +23,8 @@ public class DatabaseAppService
         IRestoreService restore,
         DatabaseWizardService wizard,
         IExternalEditorService editor,
-        IProcessExecutor process)
+        IProcessExecutor process,
+        IBackupScheduler scheduler)
     {
         _scanner = scanner;
         _manager = manager;
@@ -32,6 +34,7 @@ public class DatabaseAppService
         _wizard = wizard;
         _editor = editor;
         _process = process;
+        _scheduler = scheduler;
     }
 
     public async Task HandleScanAsync()
@@ -109,6 +112,7 @@ public class DatabaseAppService
             Console.WriteLine("[4] Wejdź do konsoli CLI");
             Console.WriteLine("[5] Backup");
             Console.WriteLine("[6] Odtwórz z pliku (Restore)");
+            Console.WriteLine("[7] Skonfiguruj automatyczny backup (harmonogram)");
             Console.WriteLine("[0] Powrót do menu głównego");
             Console.Write("\nWybór działania: ");
 
@@ -240,6 +244,12 @@ public class DatabaseAppService
                     break;
                 }
 
+                case "7":
+                {
+                    await HandleScheduleBackupAsync(selectedDb.ServiceName, selectedDb.Name);
+                    break;
+                }
+
                 default:
                     Console.WriteLine("Niepoprawna opcja.");
                     break;
@@ -248,6 +258,250 @@ public class DatabaseAppService
             var updatedList = await _scanner.ScanForDatabasesAsync();
             selectedDb = updatedList.FirstOrDefault(d => d.ServiceName == selectedDb.ServiceName) ?? selectedDb;
         }
+    }
+
+    public async Task HandleRestoreAsync(string serviceName, string friendlyName)
+    {
+        var config = _configRepo.Get(serviceName);
+        bool hasRestoreCommand = config?.RestoreCommand is { Length: > 0 };
+
+        if (!hasRestoreCommand)
+        {
+            Console.WriteLine($"\n[!] Brak zdefiniowanej komendy restore dla '{friendlyName}'.");
+            return;
+        }
+
+        var backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        var backupFiles = Directory.GetFiles(backupDir, $"backup_{serviceName}*")
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.LastWriteTime)
+            .ToList();
+
+        if (backupFiles.Count == 0)
+        {
+            Console.WriteLine($"\n[!] Brak plików backupu dla '{friendlyName}' w katalogu:\n  {backupDir}");
+            return;
+        }
+
+        Console.WriteLine($"\n--- Dostępne backupy dla {friendlyName} ---");
+        for (int i = 0; i < backupFiles.Count; i++)
+        {
+            var f = backupFiles[i];
+            Console.WriteLine($"[{i + 1}] {f.Name} ({f.LastWriteTime:yyyy-MM-dd HH:mm:ss})");
+        }
+        Console.WriteLine("[0] Anuluj");
+        Console.Write("\nWybór pliku: ");
+
+        if (!int.TryParse(Console.ReadLine(), out int fileIndex) || fileIndex <= 0 || fileIndex > backupFiles.Count)
+        {
+            Console.WriteLine("Anulowano.");
+            return;
+        }
+
+        string selectedPath = backupFiles[fileIndex - 1].FullName;
+
+        string? targetDatabase = null;
+        bool hasSingleDbRestore = config?.SingleDatabaseRestoreCommand is { Length: > 0 };
+        bool hasListCommand = config?.ListDatabasesCommand is { Length: > 0 };
+
+        if (hasSingleDbRestore && hasListCommand)
+        {
+            Console.WriteLine("\n--- Wybierz docelową bazę danych ---");
+            Console.WriteLine("[1] Przywróć do całego silnika");
+            Console.WriteLine("[2] Przywróć do konkretnej bazy");
+            Console.WriteLine("[0] Anuluj");
+            Console.Write("\nWybór: ");
+
+            var modeChoice = Console.ReadLine()?.Trim();
+            if (modeChoice == "0")
+            {
+                Console.WriteLine("Anulowano.");
+                return;
+            }
+
+            if (modeChoice == "2")
+            {
+                var databases = await _manager.GetDatabasesAsync(serviceName);
+                if (databases.Any())
+                {
+                    Console.WriteLine($"\n--- Wybierz docelową bazę danych ---");
+                    for (int d = 0; d < databases.Count; d++)
+                        Console.WriteLine($"[{d + 1}] {databases[d]}");
+
+                    Console.Write("\nWybór: ");
+
+                    if (int.TryParse(Console.ReadLine(), out int dbIdx) && dbIdx > 0 && dbIdx <= databases.Count)
+                        targetDatabase = databases[dbIdx - 1];
+                    else
+                    {
+                        Console.WriteLine("Niepoprawny wybór. Przywracam do całego silnika.");
+                    }
+                }
+            }
+        }
+
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("\n[!] UWAGA: Odtwarzanie danych nadpisze istniejące tabele/bazy!");
+        Console.ResetColor();
+        Console.Write("Czy na pewno chcesz kontynuować? (y/N): ");
+
+        var confirm = Console.ReadLine()?.ToLower().Trim();
+        if (confirm != "y" && confirm != "yes")
+        {
+            Console.WriteLine("Anulowano.");
+            return;
+        }
+
+        Console.WriteLine($"\nPrzywracanie backupu dla {friendlyName}...");
+        var result = await _restore.RestoreAsync(serviceName, selectedPath, targetDatabase);
+
+        if (result.Success)
+            Console.WriteLine("[V] Przywracanie zakończone pomyślnie.");
+        else
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"[X] Błąd przywracania:\n{result.Error}");
+            Console.ResetColor();
+        }
+    }
+
+    public async Task HandleScheduleBackupAsync(string serviceName, string friendlyName)
+    {
+        var config = _configRepo.Get(serviceName);
+        if (config == null)
+        {
+            Console.WriteLine($"[!] Brak konfiguracji dla '{friendlyName}'.");
+            return;
+        }
+
+        if (config.Schedule != null && config.Schedule.Enabled)
+        {
+            Console.WriteLine($"\n[!] Harmonogram backupu dla '{friendlyName}' jest już aktywny.");
+            Console.WriteLine($"    Typ: {config.Schedule.Type}");
+            if (config.Schedule.Type == "interval")
+                Console.WriteLine($"    Interwał: co {config.Schedule.IntervalHours} godzin");
+            else if (config.Schedule.Type == "daily")
+                Console.WriteLine($"    Codziennie o: {config.Schedule.DailyTime}");
+            Console.WriteLine($"    Baza: {config.Schedule.DatabaseName ?? "(cały silnik)"}");
+            Console.WriteLine($"    Kompresja: {(config.Schedule.Compress ? "Tak" : "Nie")}");
+
+            Console.Write("\nCzy chcesz usunąć istniejący harmonogram? (t/N): ");
+            var removeConfirm = Console.ReadLine()?.ToLower().Trim();
+            if (removeConfirm == "t" || removeConfirm == "tak")
+            {
+                var removeResult = await _scheduler.RemoveScheduleAsync(serviceName);
+                if (removeResult.Success)
+                    Console.WriteLine($"[V] {removeResult.Message}");
+                else
+                    Console.WriteLine($"[X] {removeResult.Message}");
+            }
+            return;
+        }
+
+        Console.WriteLine($"\n=== Konfiguracja automatycznego backupu dla: {friendlyName} ===");
+        Console.WriteLine("--- Wybierz typ harmonogramu ---");
+        Console.WriteLine("[1] Co określoną liczbę godzin (np. co 6 godzin)");
+        Console.WriteLine("[2] Codziennie o konkretnej godzinie (np. 03:00)");
+        Console.WriteLine("[0] Anuluj");
+        Console.Write("\nWybór: ");
+
+        var typeChoice = Console.ReadLine()?.Trim();
+        if (typeChoice == "0")
+        {
+            Console.WriteLine("Anulowano.");
+            return;
+        }
+
+        ScheduleConfig? schedule = null;
+        string scheduleInput = "";
+
+        if (typeChoice == "1")
+        {
+            Console.Write("Podaj interwał w godzinach (1-24): ");
+            var hoursInput = Console.ReadLine()?.Trim();
+            if (int.TryParse(hoursInput, out int hours) && hours > 0 && hours <= 24)
+            {
+                scheduleInput = $"hourly {hours}";
+            }
+            else
+            {
+                Console.WriteLine("[X] Nieprawidłowa liczba godzin.");
+                return;
+            }
+        }
+        else if (typeChoice == "2")
+        {
+            Console.Write("Podaj godzinę (HH:mm, np. 03:00): ");
+            var timeInput = Console.ReadLine()?.Trim();
+            if (TimeOnly.TryParse(timeInput, out TimeOnly time))
+            {
+                scheduleInput = $"daily {time:HH:mm}";
+            }
+            else
+            {
+                Console.WriteLine("[X] Nieprawidłowy format godziny. Użyj HH:mm.");
+                return;
+            }
+        }
+        else
+        {
+            Console.WriteLine("Niepoprawny wybór.");
+            return;
+        }
+
+        var hasSingleDbCommand = config?.SingleDatabaseBackupCommand is { Length: > 0 };
+        var hasListCommand = config?.ListDatabasesCommand is { Length: > 0 };
+        string? selectedDatabaseName = null;
+
+        if (hasSingleDbCommand && hasListCommand)
+        {
+            Console.WriteLine("\n--- Wybierz bazę danych do backupu (opcjonalnie) ---");
+            Console.WriteLine("[1] Cały silnik (Full Backup)");
+            Console.WriteLine("[2] Konkretna baza danych");
+            Console.Write("\nWybór: ");
+
+            var dbChoice = Console.ReadLine()?.Trim();
+            if (dbChoice == "2")
+            {
+                var internalDatabases = await _manager.GetDatabasesAsync(serviceName);
+                if (internalDatabases.Any())
+                {
+                    Console.WriteLine($"\n--- Wybierz bazę danych z silnika {friendlyName} ---");
+                    for (int d = 0; d < internalDatabases.Count; d++)
+                        Console.WriteLine($"[{d + 1}] {internalDatabases[d]}");
+
+                    Console.WriteLine("[0] Anuluj");
+                    Console.Write("\nWybór: ");
+
+                    if (int.TryParse(Console.ReadLine(), out int internalIndex) && internalIndex > 0 && internalIndex <= internalDatabases.Count)
+                        selectedDatabaseName = internalDatabases[internalIndex - 1];
+                }
+            }
+        }
+
+        Console.Write("\nKompresować backup? (T/n): ");
+        var compressInput = Console.ReadLine()?.ToLower().Trim();
+        bool compress = compressInput != "n" && compressInput != "no";
+
+        try
+        {
+            schedule = _scheduler.ParseScheduleInput(scheduleInput);
+            schedule.DatabaseName = selectedDatabaseName;
+            schedule.Compress = compress;
+            schedule.Enabled = true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[X] Błąd parsowania harmonogramu: {ex.Message}");
+            return;
+        }
+
+        var result = await _scheduler.CreateScheduleAsync(serviceName, schedule);
+
+        if (result.Success)
+            Console.WriteLine($"[V] {result.Message}");
+        else
+            Console.WriteLine($"[X] {result.Message}");
     }
 
     public async Task HandleAddDatabaseWizardAsync()
@@ -361,111 +615,6 @@ public class DatabaseAppService
         {
             _configRepo.Unregister(serviceName);
             Console.WriteLine("Usunięto z listy monitorowanych.");
-        }
-    }
-
-    public async Task HandleRestoreAsync(string serviceName, string friendlyName)
-    {
-        var config = _configRepo.Get(serviceName);
-        bool hasRestoreCommand = config?.RestoreCommand is { Length: > 0 };
-
-        if (!hasRestoreCommand)
-        {
-            Console.WriteLine($"\n[!] Brak zdefiniowanej komendy restore dla '{friendlyName}'.");
-            return;
-        }
-
-        var backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
-        var backupFiles = Directory.GetFiles(backupDir, $"backup_{serviceName}*")
-            .Select(f => new FileInfo(f))
-            .OrderByDescending(f => f.LastWriteTime)
-            .ToList();
-
-        if (backupFiles.Count == 0)
-        {
-            Console.WriteLine($"\n[!] Brak plików backupu dla '{friendlyName}' w katalogu:\n  {backupDir}");
-            return;
-        }
-
-        Console.WriteLine($"\n--- Dostępne backupy dla {friendlyName} ---");
-        for (int i = 0; i < backupFiles.Count; i++)
-        {
-            var f = backupFiles[i];
-            Console.WriteLine($"[{i + 1}] {f.Name} ({f.LastWriteTime:yyyy-MM-dd HH:mm:ss})");
-        }
-        Console.WriteLine("[0] Anuluj");
-        Console.Write("\nWybór pliku: ");
-
-        if (!int.TryParse(Console.ReadLine(), out int fileIndex) || fileIndex <= 0 || fileIndex > backupFiles.Count)
-        {
-            Console.WriteLine("Anulowano.");
-            return;
-        }
-
-        string selectedPath = backupFiles[fileIndex - 1].FullName;
-
-        string? targetDatabase = null;
-        bool hasSingleDbRestore = config?.SingleDatabaseRestoreCommand is { Length: > 0 };
-        bool hasListCommand = config?.ListDatabasesCommand is { Length: > 0 };
-
-        if (hasSingleDbRestore && hasListCommand)
-        {
-            Console.WriteLine("\n--- Wybierz docelową bazę danych ---");
-            Console.WriteLine("[1] Przywróć do całego silnika");
-            Console.WriteLine("[2] Przywróć do konkretnej bazy");
-            Console.WriteLine("[0] Anuluj");
-            Console.Write("\nWybór: ");
-
-            var modeChoice = Console.ReadLine()?.Trim();
-            if (modeChoice == "0")
-            {
-                Console.WriteLine("Anulowano.");
-                return;
-            }
-
-            if (modeChoice == "2")
-            {
-                var databases = await _manager.GetDatabasesAsync(serviceName);
-                if (databases.Any())
-                {
-                    Console.WriteLine($"\n--- Wybierz docelową bazę danych ---");
-                    for (int d = 0; d < databases.Count; d++)
-                        Console.WriteLine($"[{d + 1}] {databases[d]}");
-
-                    Console.Write("\nWybór: ");
-
-                    if (int.TryParse(Console.ReadLine(), out int dbIdx) && dbIdx > 0 && dbIdx <= databases.Count)
-                        targetDatabase = databases[dbIdx - 1];
-                    else
-                    {
-                        Console.WriteLine("Niepoprawny wybór. Przywracam do całego silnika.");
-                    }
-                }
-            }
-        }
-
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("\n[!] UWAGA: Odtwarzanie danych nadpisze istniejące tabele/bazy!");
-        Console.ResetColor();
-        Console.Write("Czy na pewno chcesz kontynuować? (y/N): ");
-
-        var confirm = Console.ReadLine()?.ToLower().Trim();
-        if (confirm != "y" && confirm != "yes")
-        {
-            Console.WriteLine("Anulowano.");
-            return;
-        }
-
-        Console.WriteLine($"\nPrzywracanie backupu dla {friendlyName}...");
-        var result = await _restore.RestoreAsync(serviceName, selectedPath, targetDatabase);
-
-        if (result.Success)
-            Console.WriteLine("[V] Przywracanie zakończone pomyślnie.");
-        else
-        {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"[X] Błąd przywracania:\n{result.Error}");
-            Console.ResetColor();
         }
     }
 }

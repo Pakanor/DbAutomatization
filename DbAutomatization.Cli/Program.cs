@@ -33,6 +33,7 @@ class Program
                 .AddTransient<DatabaseWizardService>()
                 .AddTransient<IDatabaseScanner, SystemdScanner>()
                 .AddTransient<IServiceManager, SystemdServiceManager>()
+                .AddTransient<IBackupScheduler, BackupScheduler>()
                 .AddTransient<DatabaseAppService>()
                 .AddTransient<ConsoleMenu>()
                 .BuildServiceProvider();
