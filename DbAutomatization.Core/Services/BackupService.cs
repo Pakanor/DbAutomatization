@@ -54,7 +54,7 @@ public class BackupService : IBackupService
 
         if (config.PreBackupCommand is { Length: > 0 })
         {
-            string[] preArgs = CommandTemplate.Substitute(config.PreBackupCommand, serviceName, fullPath, databaseName);
+            string[] preArgs = CommandTemplate.Substitute(config.PreBackupCommand, serviceName, fullPath, databaseName, backupDir);
 
             var preResult = await _process.ExecuteAsync(
                 preArgs[0], preArgs[1..],
@@ -70,7 +70,7 @@ public class BackupService : IBackupService
             }
         }
 
-        string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, fullPath, databaseName);
+        string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, fullPath, databaseName, backupDir);
 
         bool hasPathInTemplate = baseCommand.Any(arg => arg.Contains("{path}"));
 
