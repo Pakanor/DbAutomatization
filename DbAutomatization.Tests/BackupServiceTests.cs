@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
 using FluentAssertions;
@@ -440,5 +441,114 @@ public class BackupServiceTests
             It.IsAny<Stream>(),
             It.IsAny<int>(),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CompressionEnabledByDefault_CreatesGzFile()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        Stream? capturedStream = null;
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "sudo",
+                It.Is<string[]>(args => args.Contains("pg_dumpall")),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string[], Stream, int, CancellationToken>((_, __, stream, _, _) => capturedStream = stream)
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("postgresql");
+
+        result.Success.Should().BeTrue();
+        result.FilePath.Should().EndWith(".bak.gz");
+        capturedStream.Should().BeOfType<GZipStream>();
+    }
+
+    [Fact]
+    public async Task CompressionDisabled_CreatesBakFile()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            BackupCommand = ["sudo", "-u", "postgres", "pg_dumpall"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        Stream? capturedStream = null;
+        _processMock
+            .Setup(p => p.ExecuteAndStreamOutputAsync(
+                "sudo",
+                It.Is<string[]>(args => args.Contains("pg_dumpall")),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string[], Stream, int, CancellationToken>((_, __, stream, _, _) => capturedStream = stream)
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("postgresql", compress: false);
+
+        result.Success.Should().BeTrue();
+        result.FilePath.Should().EndWith(".bak");
+        capturedStream.Should().NotBeOfType<GZipStream>();
+        capturedStream.Should().BeOfType<FileStream>();
+    }
+
+    [Fact]
+    public async Task ExplicitPathPlaceholder_WithCompression_CreatesGzFile()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "MongoDB",
+            BackupCommand = ["mongodump", "--archive={path}"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("mongod")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "mongodump",
+                It.Is<string[]>(args => args.Length == 1 && args[0].StartsWith("--archive=")),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("mongod");
+
+        result.Success.Should().BeTrue();
+        result.FilePath.Should().EndWith(".bak.gz");
+    }
+
+    [Fact]
+    public async Task ExplicitPathPlaceholder_WithoutCompression_CreatesBakFile()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "MongoDB",
+            BackupCommand = ["mongodump", "--archive={path}"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("mongod")).Returns(config);
+
+        _processMock
+            .Setup(p => p.ExecuteAsync(
+                "mongodump",
+                It.Is<string[]>(args => args.Length == 1 && args[0].StartsWith("--archive=")),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult("", "", 0));
+
+        var result = await _service.CreateBackupAsync("mongod", compress: false);
+
+        result.Success.Should().BeTrue();
+        result.FilePath.Should().EndWith(".bak");
     }
 }

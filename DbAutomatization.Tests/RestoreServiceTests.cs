@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using DbAutomatization.Core.Exceptions;
 using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
@@ -25,6 +26,7 @@ public class RestoreServiceTests
 
     private string CreateValidBackupFile(string content = "SQL content", string extension = ".sql")
     {
+        Directory.CreateDirectory(_backupDir);
         string fileName = $"backup_test_{Guid.NewGuid():N}{extension}";
         string fullPath = Path.Combine(_backupDir, fileName);
         File.WriteAllText(fullPath, content);
@@ -279,6 +281,144 @@ public class RestoreServiceTests
         finally
         {
             if (File.Exists(invalidFile)) File.Delete(invalidFile);
+        }
+    }
+
+    private string CreateCompressedBackupFile(string content = "SQL content")
+    {
+        Directory.CreateDirectory(_backupDir);
+        string fileName = $"backup_test_{Guid.NewGuid():N}.bak.gz";
+        string fullPath = Path.Combine(_backupDir, fileName);
+        using var fileStream = File.Create(fullPath);
+        using var gzipStream = new GZipStream(fileStream, CompressionLevel.Optimal, leaveOpen: false);
+        using var writer = new StreamWriter(gzipStream);
+        writer.Write(content);
+        return fullPath;
+    }
+
+    [Fact]
+    public async Task RestoreAsync_GzFile_DecompressesAndStreamsToStdin()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            RestoreCommand = ["sudo", "-u", "postgres", "psql"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        string backupFile = CreateCompressedBackupFile("-- PostgreSQL dump\nCREATE TABLE test (id int);");
+        try
+        {
+            Stream? capturedStream = null;
+            _processMock
+                .Setup(p => p.ExecuteWithStdinStreamAsync(
+                    "sudo",
+                    It.Is<string[]>(args => args[0] == "-u"),
+                    It.IsAny<Stream>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<string, string[], Stream, int, CancellationToken>((_, __, stream, _, _) => capturedStream = stream)
+                .ReturnsAsync(new ProcessResult("", "", 0));
+
+            var result = await _service.RestoreAsync("postgresql", backupFile);
+
+            result.Success.Should().BeTrue();
+            capturedStream.Should().BeOfType<GZipStream>();
+        }
+        finally
+        {
+            if (File.Exists(backupFile)) File.Delete(backupFile);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreAsync_GzFileWithMagicBytes_DecompressesAndStreamsToStdin()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            RestoreCommand = ["sudo", "-u", "postgres", "psql"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        // Create a .bak file with gzip content (magic bytes)
+        string fileName = $"backup_test_{Guid.NewGuid():N}.bak";
+        string fullPath = Path.Combine(_backupDir, fileName);
+        using (var fileStream = File.Create(fullPath))
+        using (var gzipStream = new GZipStream(fileStream, CompressionLevel.Optimal, leaveOpen: false))
+        using (var writer = new StreamWriter(gzipStream))
+        {
+            writer.Write("-- PostgreSQL dump\nCREATE TABLE test (id int);");
+        }
+
+        try
+        {
+            Stream? capturedStream = null;
+            _processMock
+                .Setup(p => p.ExecuteWithStdinStreamAsync(
+                    "sudo",
+                    It.Is<string[]>(args => args[0] == "-u"),
+                    It.IsAny<Stream>(),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<string, string[], Stream, int, CancellationToken>((_, __, stream, _, _) => capturedStream = stream)
+                .ReturnsAsync(new ProcessResult("", "", 0));
+
+            var result = await _service.RestoreAsync("postgresql", fullPath);
+
+            result.Success.Should().BeTrue();
+            capturedStream.Should().BeOfType<GZipStream>();
+        }
+        finally
+        {
+            if (File.Exists(fullPath)) File.Delete(fullPath);
+        }
+    }
+
+    [Fact]
+    public async Task RestoreAsync_RegularFile_UsesExecuteWithStdinFileAsync()
+    {
+        var config = new DatabaseConfig
+        {
+            FriendlyName = "PostgreSQL",
+            RestoreCommand = ["sudo", "-u", "postgres", "psql"]
+        };
+
+        _configRepoMock.Setup(r => r.Get("postgresql")).Returns(config);
+
+        string backupFile = CreateValidBackupFile("-- PostgreSQL dump\nCREATE TABLE test (id int);");
+        try
+        {
+            _processMock
+                .Setup(p => p.ExecuteWithStdinFileAsync(
+                    "sudo",
+                    It.Is<string[]>(args => args[0] == "-u"),
+                    backupFile,
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcessResult("", "", 0));
+
+            var result = await _service.RestoreAsync("postgresql", backupFile);
+
+            result.Success.Should().BeTrue();
+            _processMock.Verify(p => p.ExecuteWithStdinFileAsync(
+                "sudo",
+                It.Is<string[]>(args => args[0] == "-u"),
+                backupFile,
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            _processMock.Verify(p => p.ExecuteWithStdinStreamAsync(
+                It.IsAny<string>(),
+                It.IsAny<string[]>(),
+                It.IsAny<Stream>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            if (File.Exists(backupFile)) File.Delete(backupFile);
         }
     }
 }
