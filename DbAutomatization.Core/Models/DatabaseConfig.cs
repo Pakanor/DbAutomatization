@@ -5,7 +5,7 @@ namespace DbAutomatization.Core.Models;
 
 public class DatabaseConfig
 {
-    public string EngineType { get; set; } = "systemd"; // Obsługiwane wartości: "systemd" | "docker"
+    public string EngineType { get; set; } = "systemd";
 
     public string FriendlyName { get; set; } = string.Empty;
 
@@ -35,6 +35,23 @@ public class DatabaseConfig
     public int RetentionCount { get; set; } = 0;
 
     public int OutputColumnIndex { get; set; } = 0;
+
+    public ScheduleConfig? Schedule { get; set; }
+}
+
+public class ScheduleConfig
+{
+    public bool Enabled { get; set; }
+
+    public string Type { get; set; } = string.Empty; // "interval" | "daily"
+
+    public int? IntervalHours { get; set; }
+
+    public string? DailyTime { get; set; } // HH:mm format
+
+    public string? DatabaseName { get; set; }
+
+    public bool Compress { get; set; } = true;
 }
 
 public class CommandArrayConverter : JsonConverter<string[]>
