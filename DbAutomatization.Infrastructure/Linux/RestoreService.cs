@@ -1,3 +1,4 @@
+using DbAutomatization.Core.Exceptions;
 using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
 
@@ -38,15 +39,10 @@ public class RestoreService : IRestoreService
                 -1);
         }
 
-        if (!File.Exists(filePath))
-        {
-            return new ProcessResult(
-                string.Empty,
-                $"Plik backupu nie istnieje: '{filePath}'.",
-                -1);
-        }
+        string backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        VerifyBackupFile(filePath, backupDir, config);
 
-        string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, filePath, databaseName);
+        string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, filePath, databaseName, backupDir);
 
         bool hasPathInTemplate = baseCommand.Any(arg => arg.Contains("{path}"));
 
@@ -62,6 +58,51 @@ public class RestoreService : IRestoreService
             finalArgs[0], finalArgs[1..], filePath,
             timeoutSeconds: 300,
             cancellationToken: cancellationToken);
+    }
+
+    private static void VerifyBackupFile(string filePath, string backupDirectory, DatabaseConfig config)
+    {
+        if (!File.Exists(filePath))
+        {
+            throw new DatabaseConfigurationException($"Plik backupu nie istnieje: '{filePath}'.");
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+        {
+            throw new DatabaseConfigurationException($"Plik backupu jest pusty: '{filePath}'.");
+        }
+
+        string fullBackupDir = Path.GetFullPath(backupDirectory);
+        string fullFilePath = Path.GetFullPath(filePath);
+
+        if (!fullFilePath.StartsWith(fullBackupDir, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DatabaseConfigurationException(
+                $"Plik backupu '{filePath}' znajduje się poza dozwolonym katalogiem '{backupDirectory}'.");
+        }
+
+        ValidateFileExtension(filePath, config);
+    }
+
+    private static void ValidateFileExtension(string filePath, DatabaseConfig config)
+    {
+        string extension = Path.GetExtension(filePath).ToLowerInvariant();
+        string engineType = config.EngineType?.ToLowerInvariant() ?? "systemd";
+
+        bool isValidExtension = engineType switch
+        {
+            "systemd" => extension is ".sql" or ".bak" or ".dump" or ".bak",
+            "docker" => extension is ".sql" or ".bak" or ".dump" or ".bak",
+            _ => extension is ".sql" or ".bak" or ".dump" or ".bak"
+        };
+
+        if (!isValidExtension)
+        {
+            throw new DatabaseConfigurationException(
+                $"Plik backupu '{filePath}' ma nieobsługiwane rozszerzenie '{extension}'. " +
+                "Oczekiwane: .sql, .bak, .dump");
+        }
     }
 
     private static string[] SelectRestoreCommand(DatabaseConfig config, string? databaseName)
