@@ -40,7 +40,7 @@ public class RestoreService : IRestoreService
                 -1);
         }
 
-        string backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        string backupDir = BackupService.GetBackupDirectory();
         VerifyBackupFile(filePath, backupDir, config);
 
         string[] finalArgs = CommandTemplate.Substitute(baseCommand, serviceName, filePath, databaseName, backupDir);

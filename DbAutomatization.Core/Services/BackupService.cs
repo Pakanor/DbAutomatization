@@ -45,7 +45,7 @@ public class BackupService : IBackupService
                 -1);
         }
 
-        string backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        string backupDir = GetBackupDirectory();
         Directory.CreateDirectory(backupDir);
 
         string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff");
@@ -133,5 +133,35 @@ public class BackupService : IBackupService
             return config.SingleDatabaseBackupCommand;
 
         return config.BackupCommand ?? [];
+    }
+
+    public static string GetBackupDirectory()
+    {
+        string? envBackupDir = Environment.GetEnvironmentVariable("DBAUTOMATE_BACKUP_DIR");
+        if (!string.IsNullOrWhiteSpace(envBackupDir))
+        {
+            Directory.CreateDirectory(envBackupDir);
+            return envBackupDir;
+        }
+
+        string baseDir = "/var/backups/dbautomatize";
+        try
+        {
+            Directory.CreateDirectory(baseDir);
+            // Verify we can write to it
+            string testFile = Path.Combine(baseDir, ".write_test");
+            File.WriteAllText(testFile, "");
+            File.Delete(testFile);
+            return baseDir;
+        }
+        catch
+        {
+            // Use user's home directory as fallback
+            string fallbackDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".local", "share", "dbautomatize", "backups");
+            Directory.CreateDirectory(fallbackDir);
+            return fallbackDir;
+        }
     }
 }
