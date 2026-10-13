@@ -1,5 +1,6 @@
 #pragma warning disable CA1416
 
+using System.IO.Compression;
 using DbAutomatization.Core.Models;
 
 namespace DbAutomatization.Core.Services;
@@ -23,6 +24,7 @@ public class BackupService : IBackupService
     public async Task<BackupResult> CreateBackupAsync(
         string serviceName,
         string? databaseName = null,
+        bool compress = true,
         CancellationToken cancellationToken = default)
     {
         var config = _configRepo.Get(serviceName);
@@ -48,7 +50,8 @@ public class BackupService : IBackupService
 
         string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff");
         string dbNamePart = !string.IsNullOrEmpty(databaseName) ? $"_{databaseName}" : "";
-        string fileName = $"backup_{serviceName}{dbNamePart}_{timestamp}.bak";
+        string extension = compress ? ".bak.gz" : ".bak";
+        string fileName = $"backup_{serviceName}{dbNamePart}_{timestamp}{extension}";
         string fullPath = Path.Combine(backupDir, fileName);
         int timeout = config.BackupTimeoutSeconds;
 
@@ -85,15 +88,29 @@ public class BackupService : IBackupService
         else
         {
             using var fileStream = File.Create(fullPath);
-            result = await _process.ExecuteAndStreamOutputAsync(
-                finalArgs[0], finalArgs[1..], fileStream,
-                timeoutSeconds: timeout,
-                cancellationToken: cancellationToken);
+            Stream outputStream = compress
+                ? new GZipStream(fileStream, CompressionLevel.Optimal, leaveOpen: false)
+                : fileStream;
+
+            if (compress)
+            {
+                await using var gzipStream = (GZipStream)outputStream;
+                result = await _process.ExecuteAndStreamOutputAsync(
+                    finalArgs[0], finalArgs[1..], gzipStream,
+                    timeoutSeconds: timeout,
+                    cancellationToken: cancellationToken);
+            }
+            else
+            {
+                result = await _process.ExecuteAndStreamOutputAsync(
+                    finalArgs[0], finalArgs[1..], fileStream,
+                    timeoutSeconds: timeout,
+                    cancellationToken: cancellationToken);
+            }
         }
 
         if (result.Success)
         {
-            // Best-effort: kopie robocze nie powinny blokować backupu, gdy chmod się nie powiedzie.
             try { File.SetUnixFileMode(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead); } catch { }
         }
 
