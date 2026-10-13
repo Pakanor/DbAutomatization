@@ -20,7 +20,12 @@ public class RestoreServiceTests
         _processMock = new Mock<IProcessExecutor>();
         _configRepoMock = new Mock<IDatabaseConfigRepository>();
         _service = new RestoreService(_configRepoMock.Object, _processMock.Object);
-        _backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        
+        // Set backup directory to test project's bin directory for consistent testing
+        string testBackupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        Environment.SetEnvironmentVariable("DBAUTOMATE_BACKUP_DIR", testBackupDir);
+        
+        _backupDir = BackupService.GetBackupDirectory();
         Directory.CreateDirectory(_backupDir);
     }
 
