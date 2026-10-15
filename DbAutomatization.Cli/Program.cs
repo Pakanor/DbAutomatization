@@ -12,9 +12,9 @@ class Program
         if (!await CheckSudoAsync())
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("[X] DbAutomatization wymaga uprawnień root (passwordless sudo).");
+            Console.WriteLine("[X] DbAutomatization wymaga uprawnień root.");
             Console.ResetColor();
-            Console.WriteLine("Uruchom: sudo dotnet run");
+            Console.WriteLine("Uruchom: sudo $(which dotnet) run");
             Console.WriteLine("Lub skonfiguruj passwordless sudo w /etc/sudoers");
             return 1;
         }
@@ -87,11 +87,30 @@ class Program
 
     private static async Task<bool> CheckSudoAsync()
     {
+        if (await IsRoot())
+        {
+            return true;
+        }
+
         try
         {
             var process = new ProcessExecutor();
             var result = await process.ExecuteAsync("sudo", ["-n", "true"], timeoutSeconds: 5);
             return result.Success;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> IsRoot()
+    {
+        try
+        {
+            var process = new ProcessExecutor();
+            var result = await process.ExecuteAsync("id", ["-u"], timeoutSeconds: 2);
+            return result.Success && result.Output.Trim() == "0";
         }
         catch
         {
