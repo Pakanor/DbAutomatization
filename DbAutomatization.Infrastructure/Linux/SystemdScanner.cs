@@ -77,7 +77,30 @@ public class SystemdScanner : IDatabaseScanner
             cancellationToken: cancellationToken);
 
         bool isInstalled = inspectResult.Success;
-        bool isRunning = isInstalled && inspectResult.Output.Trim() == "true";
+        bool isRunning = false;
+
+        if (isInstalled)
+        {
+            isRunning = inspectResult.Output.Trim() == "true";
+        }
+        else if (!string.IsNullOrWhiteSpace(inspectResult.Error))
+        {
+            string error = inspectResult.Error.ToLowerInvariant();
+            if (error.Contains("cannot connect to the docker daemon") || 
+                error.Contains("dial unix") || 
+                error.Contains("no such file") ||
+                error.Contains("is the docker daemon running"))
+            {
+                return new DetectedDatabase
+                {
+                    Name = friendlyName,
+                    ServiceName = containerName,
+                    IsInstalled = false,
+                    IsRunning = false,
+                    Error = "Docker daemon nie jest uruchomiony"
+                };
+            }
+        }
 
         return new DetectedDatabase
         {
