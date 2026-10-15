@@ -40,9 +40,7 @@ public class TemplateAutoDiscoveryService : ITemplateAutoDiscoveryService
                 continue;
 
             bool isPresent = config.EngineType == "docker"
-                ? (await _process.ExecuteAsync(
-                    "docker", ["inspect", serviceName],
-                    timeoutSeconds: 5, cancellationToken: cancellationToken)).Success
+                ? await IsDockerContainerPresent(serviceName, cancellationToken)
                 : (await _process.ExecuteAsync(
                     "systemctl", ["is-enabled", serviceName],
                     timeoutSeconds: 5, cancellationToken: cancellationToken)).Success;
@@ -53,5 +51,26 @@ public class TemplateAutoDiscoveryService : ITemplateAutoDiscoveryService
                 Console.WriteLine($"[Auto-Discovery] Wykryto {config.FriendlyName} ({serviceName}) — dodano do monitorowania.");
             }
         }
+    }
+
+    private async Task<bool> IsDockerContainerPresent(string containerName, CancellationToken cancellationToken)
+    {
+        var result = await _process.ExecuteAsync(
+            "docker", ["inspect", containerName],
+            timeoutSeconds: 5, cancellationToken: cancellationToken);
+        
+        if (!result.Success && !string.IsNullOrWhiteSpace(result.Error))
+        {
+            string error = result.Error.ToLowerInvariant();
+            if (error.Contains("cannot connect to the docker daemon") || 
+                error.Contains("dial unix") || 
+                error.Contains("no such file") ||
+                error.Contains("is the docker daemon running"))
+            {
+                return false;
+            }
+        }
+        
+        return result.Success;
     }
 }
