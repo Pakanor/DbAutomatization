@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using DbAutomatization.Core.Exceptions;
 using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
@@ -67,12 +68,6 @@ public class BackupScheduler : IBackupScheduler
 
             return new ScheduleResult(true, $"Harmonogram backupu dla '{serviceName}' został utworzony i uruchomiony.", 0);
         }
-        catch (UnauthorizedAccessException)
-        {
-            return new ScheduleResult(false,
-                "Brak uprawnień do zapisu w /etc/systemd/system/. Uruchom program z sudo.",
-                -1);
-        }
         catch (Exception ex)
         {
             return new ScheduleResult(false, $"Błąd tworzenia harmonogramu: {ex.Message}", -1);
@@ -97,10 +92,7 @@ public class BackupScheduler : IBackupScheduler
             string servicePath = Path.Combine(SystemdDirectory, serviceNameSystemd);
             string timerPath = Path.Combine(SystemdDirectory, timerNameSystemd);
 
-            if (File.Exists(servicePath))
-                File.Delete(servicePath);
-            if (File.Exists(timerPath))
-                File.Delete(timerPath);
+            await _process.ExecuteAsync("sudo", ["rm", "-f", servicePath, timerPath], timeoutSeconds: 10, cancellationToken: cancellationToken);
 
             await _process.ExecuteAsync(
                 "sudo", ["systemctl", "daemon-reload"],
@@ -219,6 +211,17 @@ WantedBy=timers.target";
     {
         cancellationToken.ThrowIfCancellationRequested();
         string fullPath = Path.Combine(SystemdDirectory, fileName);
-        await File.WriteAllTextAsync(fullPath, content, cancellationToken);
+        
+        using var inputStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        var result = await _process.ExecuteWithStdinStreamAsync(
+            "sudo", ["tee", fullPath],
+            inputStream,
+            timeoutSeconds: 10,
+            cancellationToken: cancellationToken);
+
+        if (!result.Success)
+        {
+            throw new UnauthorizedAccessException($"Failed to write {fullPath}: {result.Error}");
+        }
     }
 }
