@@ -18,7 +18,12 @@ public class IntegrationTests : IDisposable
         _tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(_tempDir);
         _configPath = Path.Combine(_tempDir, "databases.json");
-        _backupDir = BackupService.GetBackupDirectory();
+        
+        // Use a dedicated temp backup directory for this test to ensure isolation
+        _backupDir = Path.Combine(_tempDir, "backups");
+        Directory.CreateDirectory(_backupDir);
+        Environment.SetEnvironmentVariable("DBAUTOMATE_BACKUP_DIR", _backupDir);
+        
         _serviceName = $"testdb_{Guid.NewGuid():N}";
         _createdFiles = [];
     }
