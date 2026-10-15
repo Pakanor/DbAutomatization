@@ -11,13 +11,15 @@ public class IntegrationTests : IDisposable
     private readonly string _configPath;
     private readonly List<string> _createdFiles;
     private readonly string _backupDir;
+    private readonly string _serviceName;
 
     public IntegrationTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(_tempDir);
         _configPath = Path.Combine(_tempDir, "databases.json");
-        _backupDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backups");
+        _backupDir = BackupService.GetBackupDirectory();
+        _serviceName = $"testdb_{Guid.NewGuid():N}";
         _createdFiles = [];
     }
 
@@ -39,31 +41,31 @@ public class IntegrationTests : IDisposable
         var retention = new BackupRetentionManager();
         var backupService = new BackupService(configRepo, executor, retention);
 
-        configRepo.Register("testdb", new DatabaseConfig
+        configRepo.Register(_serviceName, new DatabaseConfig
         {
             FriendlyName = "TestDB",
             BackupCommand = ["touch", "{path}"],
             RetentionCount = 2
         });
 
-        CleanupTestFiles(_backupDir);
+        CleanupTestFiles();
 
-        var result1 = await backupService.CreateBackupAsync("testdb");
+        var result1 = await backupService.CreateBackupAsync(_serviceName);
         result1.Success.Should().BeTrue();
         File.Exists(result1.FilePath).Should().BeTrue();
         _createdFiles.Add(result1.FilePath);
 
-        var result2 = await backupService.CreateBackupAsync("testdb");
+        var result2 = await backupService.CreateBackupAsync(_serviceName);
         result2.Success.Should().BeTrue();
         _createdFiles.Add(result2.FilePath);
 
-        Directory.GetFiles(_backupDir, "backup_testdb*").Length.Should().Be(2);
+        Directory.GetFiles(_backupDir, $"backup_{_serviceName}*").Length.Should().Be(2);
 
-        var result3 = await backupService.CreateBackupAsync("testdb");
+        var result3 = await backupService.CreateBackupAsync(_serviceName);
         result3.Success.Should().BeTrue();
         _createdFiles.Add(result3.FilePath);
 
-        var remaining = Directory.GetFiles(_backupDir, "backup_testdb*")
+        var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*")
             .Select(Path.GetFileName)
             .OrderBy(n => n)
             .ToList();
@@ -74,10 +76,10 @@ public class IntegrationTests : IDisposable
             Path.GetFileName(result3.FilePath));
     }
 
-    private static void CleanupTestFiles(string dir)
+    private void CleanupTestFiles()
     {
-        if (!Directory.Exists(dir)) return;
-        foreach (var f in Directory.GetFiles(dir, "backup_testdb*"))
+        if (!Directory.Exists(_backupDir)) return;
+        foreach (var f in Directory.GetFiles(_backupDir, $"backup_{_serviceName}*"))
             TryDeleteFile(f);
     }
 
