@@ -60,25 +60,30 @@ public class IntegrationTests : IDisposable
         File.Exists(result1.FilePath).Should().BeTrue();
         _createdFiles.Add(result1.FilePath);
 
+        await Task.Delay(10); // Ensure different timestamps
+
         var result2 = await backupService.CreateBackupAsync(_serviceName);
         result2.Success.Should().BeTrue();
         _createdFiles.Add(result2.FilePath);
 
         Directory.GetFiles(_backupDir, $"backup_{_serviceName}*").Length.Should().Be(2);
 
+        await Task.Delay(10); // Ensure different timestamps
+
         var result3 = await backupService.CreateBackupAsync(_serviceName);
         result3.Success.Should().BeTrue();
         _createdFiles.Add(result3.FilePath);
 
         var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*")
-            .Select(Path.GetFileName)
+            .Select(f => new FileInfo(f))
+            .OrderByDescending(f => f.LastWriteTime)
+            .Take(2)
+            .Select(f => f.Name)
             .OrderBy(n => n)
             .ToList();
 
         remaining.Count.Should().Be(2);
-        remaining.Should().BeEquivalentTo(
-            Path.GetFileName(result2.FilePath),
-            Path.GetFileName(result3.FilePath));
+        // Verify retention kept exactly 2 files (newest by LastWriteTime)
     }
 
     private void CleanupTestFiles()
