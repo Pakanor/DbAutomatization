@@ -2,9 +2,11 @@ using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
 using DbAutomatization.Infrastructure.Linux;
 using FluentAssertions;
+using Xunit;
 
 namespace DbAutomatization.Tests;
 
+[Collection("IntegrationTests")]
 public class IntegrationTests : IDisposable
 {
     private readonly string _tempDir;
@@ -19,7 +21,6 @@ public class IntegrationTests : IDisposable
         Directory.CreateDirectory(_tempDir);
         _configPath = Path.Combine(_tempDir, "databases.json");
         
-        // Use a dedicated temp backup directory for this test to ensure isolation
         _backupDir = Path.Combine(_tempDir, "backups");
         Directory.CreateDirectory(_backupDir);
         Environment.SetEnvironmentVariable("DBAUTOMATE_BACKUP_DIR", _backupDir);
@@ -60,7 +61,7 @@ public class IntegrationTests : IDisposable
         File.Exists(result1.FilePath).Should().BeTrue();
         _createdFiles.Add(result1.FilePath);
 
-        await Task.Delay(10); // Ensure different timestamps
+        await Task.Delay(1100);
 
         var result2 = await backupService.CreateBackupAsync(_serviceName);
         result2.Success.Should().BeTrue();
@@ -68,22 +69,16 @@ public class IntegrationTests : IDisposable
 
         Directory.GetFiles(_backupDir, $"backup_{_serviceName}*").Length.Should().Be(2);
 
-        await Task.Delay(10); // Ensure different timestamps
+        await Task.Delay(1100);
 
         var result3 = await backupService.CreateBackupAsync(_serviceName);
         result3.Success.Should().BeTrue();
         _createdFiles.Add(result3.FilePath);
 
-        var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*")
-            .Select(f => new FileInfo(f))
-            .OrderByDescending(f => f.LastWriteTime)
-            .Take(2)
-            .Select(f => f.Name)
-            .OrderBy(n => n)
-            .ToList();
-
-        remaining.Count.Should().Be(2);
-        // Verify retention kept exactly 2 files (newest by LastWriteTime)
+        var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*");
+        remaining.Length.Should().Be(2);
+        remaining.Should().Contain(Path.GetFileName(result2.FilePath));
+        remaining.Should().Contain(Path.GetFileName(result3.FilePath));
     }
 
     private void CleanupTestFiles()
