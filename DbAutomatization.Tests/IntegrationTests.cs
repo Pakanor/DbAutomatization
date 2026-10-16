@@ -75,8 +75,10 @@ public class IntegrationTests : IDisposable
         result3.Success.Should().BeTrue();
         _createdFiles.Add(result3.FilePath);
 
-        var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*");
-        remaining.Length.Should().Be(2);
+        var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*")
+            .Select(Path.GetFileName)
+            .ToList();
+        remaining.Count.Should().Be(2);
         remaining.Should().Contain(Path.GetFileName(result2.FilePath));
         remaining.Should().Contain(Path.GetFileName(result3.FilePath));
     }
