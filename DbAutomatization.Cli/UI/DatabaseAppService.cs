@@ -56,6 +56,8 @@ public class DatabaseAppService
         {
             var db = installedDatabases[i];
             string status = db.IsRunning ? "URUCHOMIONA" : "ZATRZYMANA";
+            if (!string.IsNullOrWhiteSpace(db.Error))
+                status += $" ({db.Error})";
             Console.WriteLine($"[{i + 1}] {db.Name} ({db.ServiceName}) -> {status}");
         }
         Console.WriteLine("--------------------------------------------------");
@@ -77,7 +79,7 @@ public class DatabaseAppService
             var db = databases[i];
             string status = db.IsInstalled
                 ? (db.IsRunning ? "URUCHOMIONA" : "ZATRZYMANA")
-                : "NIEZAINSTALOWANA";
+                : (string.IsNullOrWhiteSpace(db.Error) ? "NIEZAINSTALOWANA" : $"BŁĄD: {db.Error}");
 
             Console.WriteLine($"[{i + 1}] {db.Name} ({db.ServiceName}) -> {status}");
         }

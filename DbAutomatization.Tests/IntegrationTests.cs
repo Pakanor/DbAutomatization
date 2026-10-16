@@ -2,9 +2,11 @@ using DbAutomatization.Core.Models;
 using DbAutomatization.Core.Services;
 using DbAutomatization.Infrastructure.Linux;
 using FluentAssertions;
+using Xunit;
 
 namespace DbAutomatization.Tests;
 
+[Collection("IntegrationTests")]
 public class IntegrationTests : IDisposable
 {
     private readonly string _tempDir;
@@ -18,7 +20,11 @@ public class IntegrationTests : IDisposable
         _tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(_tempDir);
         _configPath = Path.Combine(_tempDir, "databases.json");
-        _backupDir = BackupService.GetBackupDirectory();
+        
+        _backupDir = Path.Combine(_tempDir, "backups");
+        Directory.CreateDirectory(_backupDir);
+        Environment.SetEnvironmentVariable("DBAUTOMATE_BACKUP_DIR", _backupDir);
+        
         _serviceName = $"testdb_{Guid.NewGuid():N}";
         _createdFiles = [];
     }
@@ -55,11 +61,15 @@ public class IntegrationTests : IDisposable
         File.Exists(result1.FilePath).Should().BeTrue();
         _createdFiles.Add(result1.FilePath);
 
+        await Task.Delay(1100);
+
         var result2 = await backupService.CreateBackupAsync(_serviceName);
         result2.Success.Should().BeTrue();
         _createdFiles.Add(result2.FilePath);
 
         Directory.GetFiles(_backupDir, $"backup_{_serviceName}*").Length.Should().Be(2);
+
+        await Task.Delay(1100);
 
         var result3 = await backupService.CreateBackupAsync(_serviceName);
         result3.Success.Should().BeTrue();
@@ -67,13 +77,10 @@ public class IntegrationTests : IDisposable
 
         var remaining = Directory.GetFiles(_backupDir, $"backup_{_serviceName}*")
             .Select(Path.GetFileName)
-            .OrderBy(n => n)
             .ToList();
-
         remaining.Count.Should().Be(2);
-        remaining.Should().BeEquivalentTo(
-            Path.GetFileName(result2.FilePath),
-            Path.GetFileName(result3.FilePath));
+        remaining.Should().Contain(Path.GetFileName(result2.FilePath));
+        remaining.Should().Contain(Path.GetFileName(result3.FilePath));
     }
 
     private void CleanupTestFiles()
